@@ -19,9 +19,31 @@ use coinswap::{
     wallet::{RPCConfig as CoinswapRPCConfig, UTXOSpendInfo as csUtxoSpendInfo},
 };
 use std::{
-    path::PathBuf,
+    path::{Component, Path, PathBuf},
     sync::{Arc, Mutex},
 };
+
+pub(crate) fn validate_wallet_file_name(wallet_file_name: &str) -> Result<(), TakerError> {
+    let path = Path::new(wallet_file_name);
+    let mut components = path.components();
+    let first = components.next();
+    if wallet_file_name.is_empty()
+        || path.is_absolute()
+        || !matches!(first, Some(Component::Normal(_)))
+        || components.next().is_some()
+    {
+        return Err(TakerError::General {
+            msg: "wallet_file_name must be a non-empty basename".to_string(),
+        });
+    }
+    Ok(())
+}
+
+pub(crate) fn amount_to_sats(amount: i64) -> Result<u64, TakerError> {
+    u64::try_from(amount).map_err(|_| TakerError::General {
+        msg: "amount must be non-negative".to_string(),
+    })
+}
 
 /// Swap specific parameters. These are user's policy and can differ among swaps.
 /// SwapParams govern the criteria to find suitable set of makers from the offerbook.
@@ -129,6 +151,10 @@ impl Taker {
         zmq_addr: String,
         password: Option<String>,
     ) -> Result<Arc<Self>, TakerError> {
+        if let Some(name) = wallet_file_name.as_deref() {
+            validate_wallet_file_name(name)?;
+        }
+
         let data_dir = data_dir.map(PathBuf::from);
         let rpc_config = rpc_config.map(CoinswapRPCConfig::from);
 
@@ -498,18 +524,15 @@ impl Taker {
         let taker = self.taker.lock().map_err(|_| TakerError::General {
             msg: "Failed to acquire taker lock".to_string(),
         })?;
+        let amount = amount_to_sats(amount)?;
+
         let txid = taker
             .get_wallet()
             .write()
             .map_err(|_| TakerError::General {
                 msg: "Failed to acquire wallet write lock".to_string(),
             })?
-            .send_to_address(
-                amount as u64,
-                address,
-                fee_rate,
-                manually_selected_outpoints,
-            )
+            .send_to_address(amount, address, fee_rate, manually_selected_outpoints)
             .map_err(|e| TakerError::Wallet {
                 msg: format!("Send to Address error: {:?}", e),
             })?;

@@ -53,7 +53,7 @@ const isMuslFromReport = () => {
 
 const isMuslFromChildProcess = () => {
   try {
-    return require('child_process').execSync('ldd --version', { encoding: 'utf8' }).includes('musl')
+    return require('child_process').execSync('/usr/bin/ldd --version', { encoding: 'utf8' }).includes('musl')
   } catch (e) {
     // If we reach this case, we don't know if the system is musl or not, so is better to just fallback to false
     return false
@@ -61,7 +61,7 @@ const isMuslFromChildProcess = () => {
 }
 
 function requireNative() {
-  if (process.env.NAPI_RS_NATIVE_LIBRARY_PATH) {
+  if (process.env.NAPI_RS_NATIVE_LIBRARY_PATH && process.env.NAPI_RS_ALLOW_NATIVE_LIBRARY_PATH === '1') {
     try {
       return require(process.env.NAPI_RS_NATIVE_LIBRARY_PATH);
     } catch (err) {

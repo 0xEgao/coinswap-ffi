@@ -19,7 +19,31 @@ use coinswap::{
 };
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use std::{path::PathBuf, str::FromStr, sync::Mutex};
+use std::{
+  path::{Component, Path, PathBuf},
+  str::FromStr,
+  sync::Mutex,
+};
+
+fn validate_wallet_file_name(wallet_file_name: &str) -> Result<()> {
+  let path = Path::new(wallet_file_name);
+  let mut components = path.components();
+  let first = components.next();
+  if wallet_file_name.is_empty()
+    || path.is_absolute()
+    || !matches!(first, Some(Component::Normal(_)))
+    || components.next().is_some()
+  {
+    return Err(napi::Error::from_reason(
+      "wallet_file_name must be a non-empty basename",
+    ));
+  }
+  Ok(())
+}
+
+fn amount_to_sats(amount: i64) -> Result<u64> {
+  u64::try_from(amount).map_err(|_| napi::Error::from_reason("amount must be non-negative"))
+}
 
 #[napi(object)]
 pub struct SwapParams {
@@ -47,7 +71,7 @@ impl TryFrom<SwapParams> for CoinswapSwapParams {
       }
     };
 
-    let send_amount = csAmount::from_sat(params.send_amount as u64);
+    let send_amount = csAmount::from_sat(amount_to_sats(params.send_amount)?);
 
     let manually_selected_outpoints = params
       .manually_selected_outpoints
@@ -93,6 +117,10 @@ impl Taker {
     zmq_addr: String,
     password: Option<String>,
   ) -> Result<Self> {
+    if let Some(name) = wallet_file_name.as_deref() {
+      validate_wallet_file_name(name)?;
+    }
+
     let data_dir = data_dir.map(PathBuf::from);
     let rpc_config = rpc_config.map(|cfg| cfg.into());
 
@@ -140,7 +168,7 @@ impl Taker {
     // For full backtrace panics
     console_error_panic_hook::set_once();
     // This makes ALL log:: macros from any crate go to the JS console
-    console_log::init_with_level(log::Level::Trace).expect("Failed to initialize console_log");
+    let _ = console_log::init_with_level(log::Level::Trace);
     log::info!("Rust logging → Electron console is ready!");
   }
 
@@ -457,7 +485,11 @@ impl Taker {
     rpc_config: RpcConfig,
     backup_file: String,
     password: Option<String>,
-  ) {
+  ) -> Result<()> {
+    if let Some(name) = wallet_file_name.as_deref() {
+      validate_wallet_file_name(name)?;
+    }
+
     let data_dir = data_dir.map(PathBuf::from);
 
     ffi::restore_wallet_gui_app(
@@ -467,6 +499,7 @@ impl Taker {
       backup_file.into(),
       password,
     );
+    Ok(())
   }
 
   #[napi]
@@ -508,16 +541,13 @@ impl Taker {
       .inner
       .lock()
       .map_err(|e| napi::Error::from_reason(format!("Failed to acquire taker lock: {}", e)))?;
+    let amount = amount_to_sats(amount)?;
+
     let txid = taker
       .get_wallet()
       .write()
       .map_err(|e| napi::Error::from_reason(format!("Failed to acquire wallet lock: {}", e)))?
-      .send_to_address(
-        amount as u64,
-        address,
-        fee_rate,
-        manually_selected_outpoints,
-      )
+      .send_to_address(amount, address, fee_rate, manually_selected_outpoints)
       .map_err(|e| napi::Error::from_reason(format!("Send to Address error: {:?}", e)))?;
     Ok(txid.into())
   }

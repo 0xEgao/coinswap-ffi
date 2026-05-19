@@ -28,7 +28,23 @@ use coinswap::{
         },
     },
 };
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
+
+fn validate_wallet_file_name(wallet_file_name: &str) -> Result<(), TakerError> {
+    let path = Path::new(wallet_file_name);
+    let mut components = path.components();
+    let first = components.next();
+    if wallet_file_name.is_empty()
+        || path.is_absolute()
+        || !matches!(first, Some(Component::Normal(_)))
+        || components.next().is_some()
+    {
+        return Err(TakerError::General {
+            msg: "wallet_file_name must be a non-empty basename".to_string(),
+        });
+    }
+    Ok(())
+}
 
 /// Configuration parameters for connecting to a Bitcoin node via RPC.
 #[derive(Debug, Clone, uniffi::Record)]
@@ -745,7 +761,11 @@ pub fn restore_wallet_gui_app(
     rpc_config: RPCConfig,
     backup_file_path: String,
     password: Option<String>,
-) {
+) -> Result<(), TakerError> {
+    if let Some(name) = wallet_file_name.as_deref() {
+        validate_wallet_file_name(name)?;
+    }
+
     let data_dir = data_dir.map(PathBuf::from);
 
     cs_restore_wallet_gui_app(
@@ -755,6 +775,7 @@ pub fn restore_wallet_gui_app(
         backup_file_path.into(),
         password,
     );
+    Ok(())
 }
 
 /// Checks whether wallet is encrypted or not.
