@@ -120,7 +120,8 @@ public class SwapTest
             TxCount: 1,
             RequiredConfirms: 1,
             ManuallySelectedOutpoints: null,
-            PreferredMakers: null));
+            PreferredMakers: null,
+            PaymentAddress: null));
 
         var report = taker.StartCoinswap(swapId);
         Assert.NotNull(report);

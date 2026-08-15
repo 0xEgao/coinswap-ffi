@@ -11,17 +11,17 @@ use crate::{
         Txid, UtxoSpendInfo, WalletTxInfo,
     },
 };
-use coinswap::{
+use openswap::{
     bitcoin::{
-        Address as CoinswapAddress, Amount as coinswapAmount, OutPoint as coinswapOutPoint,
+        Address as OpenswapAddress, Amount as coinswapAmount, OutPoint as coinswapOutPoint,
         Txid as coinswapTxid, address::NetworkUnchecked,
     },
     protocol::ProtocolVersion,
     taker::api::{
-        ConnectionType, SwapParams as CoinswapSwapParams, Taker as CoinswapTaker, TakerInitConfig,
+        ConnectionType, SwapParams as OpenswapSwapParams, Taker as OpenswapTaker, TakerInitConfig,
     },
     wallet::{
-        BackendConfig as CoinswapBackendConfig, CoreRpcConfig as CoinswapCoreRpcConfig,
+        BackendConfig as OpenswapBackendConfig, CoreRpcConfig as OpenswapCoreRpcConfig,
         UTXOSpendInfo as csUtxoSpendInfo,
     },
 };
@@ -51,6 +51,7 @@ pub struct SwapParams {
     /// Optional explicit maker addresses.
     pub preferred_makers: Option<Vec<String>>,
     /// Optional third-party address that receives the settled swap amount.
+    #[uniffi(default = None)]
     pub payment_address: Option<String>,
 }
 
@@ -61,7 +62,7 @@ fn checked_satoshi_amount(amount: i64) -> Result<u64, TakerError> {
 }
 
 /// SwapParams govern the criteria to find suitable set of makers from the offerbook.
-impl TryFrom<SwapParams> for CoinswapSwapParams {
+impl TryFrom<SwapParams> for OpenswapSwapParams {
     type Error = TakerError;
 
     /// Swap specific parameters. These are user's policy and can differ among swaps.
@@ -99,14 +100,14 @@ impl TryFrom<SwapParams> for CoinswapSwapParams {
             .payment_address
             .map(|address| {
                 address
-                    .parse::<CoinswapAddress<NetworkUnchecked>>()
+                    .parse::<OpenswapAddress<NetworkUnchecked>>()
                     .map_err(|e| TakerError::General {
                         msg: format!("Invalid payment address: {}", e),
                     })
             })
             .transpose()?;
 
-        Ok(CoinswapSwapParams {
+        Ok(OpenswapSwapParams {
             protocol,
             send_amount,
             maker_count: params.maker_count as usize,
@@ -125,7 +126,7 @@ impl TryFrom<SwapParams> for CoinswapSwapParams {
 #[derive(uniffi::Object)]
 pub struct Taker {
     /// The Taker structure that performs bulk of the coinswap protocol.
-    taker: Mutex<CoinswapTaker>,
+    taker: Mutex<OpenswapTaker>,
 }
 
 #[uniffi::export]
@@ -161,13 +162,13 @@ impl Taker {
     ) -> Result<Arc<Self>, TakerError> {
         let data_dir = data_dir.map(PathBuf::from);
         let backend = match backend_config {
-            Some(config) => CoinswapBackendConfig::try_from(config)?,
-            None => CoinswapBackendConfig::CoreRpc(
+            Some(config) => OpenswapBackendConfig::try_from(config)?,
+            None => OpenswapBackendConfig::CoreRpc(
                 rpc_config
                     .map(|config| config.into_core_rpc_config(zmq_addr.clone()))
-                    .unwrap_or_else(|| CoinswapCoreRpcConfig {
+                    .unwrap_or_else(|| OpenswapCoreRpcConfig {
                         zmq_addr: zmq_addr.clone(),
-                        ..CoinswapCoreRpcConfig::default()
+                        ..OpenswapCoreRpcConfig::default()
                     }),
             ),
         };
@@ -186,7 +187,7 @@ impl Taker {
             nostr_relays: nostr_relays.unwrap_or_else(|| TakerInitConfig::default().nostr_relays),
         };
 
-        let taker = CoinswapTaker::init(init_config)?;
+        let taker = OpenswapTaker::init(init_config)?;
 
         Ok(Arc::new(Self {
             taker: Mutex::new(taker),
@@ -213,17 +214,17 @@ impl Taker {
             "error" => log::LevelFilter::Error,
             _ => log::LevelFilter::Info,
         };
-        coinswap::utill::setup_taker_logger(level, true, path);
+        openswap::utill::setup_taker_logger(level, true, path);
         Ok(())
     }
 
     /// Prepares a coinswap and returns a swap id.
     pub fn prepare_coinswap(&self, swap_params: SwapParams) -> Result<String, TakerError> {
-        let params = CoinswapSwapParams::try_from(swap_params)?;
+        let params = OpenswapSwapParams::try_from(swap_params)?;
         let mut taker = self.taker.lock().map_err(|_| TakerError::General {
             msg: "Failed to acquire taker lock".to_string(),
         })?;
-        let summary = taker.prepare_coinswap(params)?;
+        let summary = taker.prepare_swap(params)?;
         Ok(summary.swap_id)
     }
 
@@ -232,7 +233,7 @@ impl Taker {
         let mut taker = self.taker.lock().map_err(|_| TakerError::General {
             msg: "Failed to acquire taker lock".to_string(),
         })?;
-        let report = taker.start_coinswap(&swap_id)?;
+        let report = taker.start_swap(&swap_id)?;
         Ok(SwapReport::from(report))
     }
 
@@ -295,7 +296,7 @@ impl Taker {
         count: u32,
         address_type: AddressType,
     ) -> Result<Vec<Address>, TakerError> {
-        let cs_address_type = coinswap::wallet::AddressType::try_from(address_type)?;
+        let cs_address_type = openswap::wallet::AddressType::try_from(address_type)?;
         let taker = self.taker.lock().map_err(|_| TakerError::General {
             msg: "Failed to acquire taker lock".to_string(),
         })?;
@@ -319,7 +320,7 @@ impl Taker {
         &self,
         address_type: AddressType,
     ) -> Result<Address, TakerError> {
-        let cs_address_type = coinswap::wallet::AddressType::try_from(address_type)?;
+        let cs_address_type = openswap::wallet::AddressType::try_from(address_type)?;
         let taker = self.taker.lock().map_err(|_| TakerError::General {
             msg: "Failed to acquire taker lock".to_string(),
         })?;
@@ -588,7 +589,7 @@ impl Taker {
             .map_err(|_| TakerError::General {
                 msg: "Failed to acquire wallet write lock".to_string(),
             })?
-            .sync_and_save(&coinswap::utill::NO_SHUTDOWN)
+            .sync_and_save(&openswap::utill::NO_SHUTDOWN)
             .map_err(|e| TakerError::Wallet {
                 msg: format!("Sync wallet error: {:?}", e),
             })?;

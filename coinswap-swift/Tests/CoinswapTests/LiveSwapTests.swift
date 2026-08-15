@@ -83,7 +83,8 @@ final class LiveSwapTests: XCTestCase {
             txCount: 1,
             requiredConfirms: 1,
             manuallySelectedOutpoints: nil,
-            preferredMakers: nil
+            preferredMakers: nil,
+            paymentAddress: nil
         )
         let swapId = try taker.prepareCoinswap(swapParams: params)
         let report = try taker.startCoinswap(swapId: swapId)

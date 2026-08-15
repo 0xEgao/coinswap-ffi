@@ -77,9 +77,9 @@ pub fn cleanup_wallet(wallet: &str) {
 
     let home = PathBuf::from(env!("HOME"));
     for dir in [
-        home.join(".coinswap"),
-        home.join(".coinswap/taker"),
-        home.join(".coinswap/taker/wallets"),
+        home.join(".openswap"),
+        home.join(".openswap/taker"),
+        home.join(".openswap/taker/wallets"),
     ] {
         if let Ok(entries) = fs::read_dir(&dir) {
             for entry in entries.flatten() {

@@ -3,7 +3,8 @@
 //! This module contains types that are used across multiple modules
 //! to avoid duplicate type definitions in TypeScript.
 
-use coinswap::{
+use napi_derive::napi;
+use openswap::{
   bitcoin::{
     absolute::LockTime as csLocktime, Address as csAddress, Amount as csAmount,
     PublicKey as csPublicKey, ScriptBuf as csScriptBuf, SignedAmount, Txid as csTxid,
@@ -16,12 +17,11 @@ use coinswap::{
   },
   wallet::{
     ffi::{MakerFeeInfo as csMakerFeeInfo, TakerReport as csTakerReport},
-    BackendConfig as CoinswapBackendConfig, Balances as CoinswapBalances,
-    CoreRpcConfig as CoinswapCoreRpcConfig, ElectrumConfig as CoinswapElectrumConfig,
+    BackendConfig as OpenswapBackendConfig, Balances as OpenswapBalances,
+    CoreRpcConfig as OpenswapCoreRpcConfig, ElectrumConfig as OpenswapElectrumConfig,
     FidelityBond as csFidelityBond,
   },
 };
-use napi_derive::napi;
 use std::{error::Error, fmt};
 
 #[napi]
@@ -76,8 +76,8 @@ pub struct Balances {
   pub spendable: i64,
 }
 
-impl From<CoinswapBalances> for Balances {
-  fn from(balances: CoinswapBalances) -> Self {
+impl From<OpenswapBalances> for Balances {
+  fn from(balances: OpenswapBalances) -> Self {
     Self {
       regular: balances.regular.to_sat() as i64,
       swap: balances.swap.to_sat() as i64,
@@ -143,8 +143,8 @@ pub struct RPCConfig {
 }
 
 impl RPCConfig {
-  pub fn into_core_rpc_config(self, zmq_addr: String) -> CoinswapCoreRpcConfig {
-    CoinswapCoreRpcConfig {
+  pub fn into_core_rpc_config(self, zmq_addr: String) -> OpenswapCoreRpcConfig {
+    OpenswapCoreRpcConfig {
       url: self.url,
       auth: Auth::UserPass(self.username, self.password),
       wallet_name: self.wallet_name,
@@ -153,7 +153,7 @@ impl RPCConfig {
   }
 }
 
-impl From<RPCConfig> for CoinswapCoreRpcConfig {
+impl From<RPCConfig> for OpenswapCoreRpcConfig {
   fn from(config: RPCConfig) -> Self {
     let default = Self::default();
     Self {
@@ -179,7 +179,7 @@ pub struct BackendConfig {
   pub max_retries: Option<u8>,
 }
 
-impl TryFrom<BackendConfig> for CoinswapBackendConfig {
+impl TryFrom<BackendConfig> for OpenswapBackendConfig {
   type Error = napi::Error;
 
   fn try_from(config: BackendConfig) -> napi::Result<Self> {
@@ -195,8 +195,8 @@ impl TryFrom<BackendConfig> for CoinswapBackendConfig {
 }
 
 impl BackendConfig {
-  fn into_rpc_backend(self) -> napi::Result<CoinswapBackendConfig> {
-    let mut config = CoinswapCoreRpcConfig::default();
+  fn into_rpc_backend(self) -> napi::Result<OpenswapBackendConfig> {
+    let mut config = OpenswapCoreRpcConfig::default();
     apply_if_some(&mut config.url, self.url);
     apply_if_some(&mut config.wallet_name, self.wallet_name);
     apply_if_some(&mut config.zmq_addr, self.zmq_addr);
@@ -209,21 +209,21 @@ impl BackendConfig {
         ));
       }
     };
-    Ok(CoinswapBackendConfig::CoreRpc(config))
+    Ok(OpenswapBackendConfig::CoreRpc(config))
   }
 
-  fn into_electrum_backend(self) -> napi::Result<CoinswapBackendConfig> {
-    let mut config = CoinswapElectrumConfig {
+  fn into_electrum_backend(self) -> napi::Result<OpenswapBackendConfig> {
+    let mut config = OpenswapElectrumConfig {
       url: self
         .url
         .ok_or_else(|| napi::Error::from_reason("Electrum backend requires url"))?,
-      ..CoinswapElectrumConfig::default()
+      ..OpenswapElectrumConfig::default()
     };
     config.socks5 = self.socks5;
     config.timeout = self.timeout;
     config.poll_interval_secs = self.poll_interval_secs.map(|v| v as u64);
     apply_if_some(&mut config.max_retries, self.max_retries);
-    Ok(CoinswapBackendConfig::Electrum(config))
+    Ok(OpenswapBackendConfig::Electrum(config))
   }
 }
 
@@ -699,13 +699,13 @@ pub enum AddressType {
   P2TR,
 }
 
-impl TryFrom<AddressType> for coinswap::wallet::AddressType {
+impl TryFrom<AddressType> for openswap::wallet::AddressType {
   type Error = napi::Error;
 
   fn try_from(addr: AddressType) -> Result<Self, Self::Error> {
     match addr {
-      AddressType::P2TR => Ok(coinswap::wallet::AddressType::P2TR),
-      AddressType::P2WPKH => Ok(coinswap::wallet::AddressType::P2WPKH),
+      AddressType::P2TR => Ok(openswap::wallet::AddressType::P2TR),
+      AddressType::P2WPKH => Ok(openswap::wallet::AddressType::P2WPKH),
     }
   }
 }

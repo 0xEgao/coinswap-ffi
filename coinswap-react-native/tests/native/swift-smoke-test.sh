@@ -29,7 +29,8 @@ func assertGeneratedBindingShapes() {
     txCount: 1,
     requiredConfirms: 1,
     manuallySelectedOutpoints: nil,
-    preferredMakers: nil
+    preferredMakers: nil,
+    paymentAddress: nil
   )
   precondition(params.sendAmount == 500_000)
 }

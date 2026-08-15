@@ -3,10 +3,10 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COINSWAP_REPO="https://github.com/mojoX911/coinswap.git"
-COINSWAP_BRANCH="electrum-sync"
+COINSWAP_REPO="https://github.com/citadel-foss/openswap.git"
+COINSWAP_BRANCH="master"
 COINSWAP_DIR="$SCRIPT_DIR/.coinswap-docker-stack"
-IMAGE_NAME="coinswap"
+IMAGE_NAME="openswap"
 BITCOIN_IMAGE_NAME="bitcoin-mutinynet"
 VERSION_FILE="latest"
 
@@ -66,10 +66,13 @@ check_docker() {
 
 setup_coinswap_repo() {
     if [ ! -d "$COINSWAP_DIR" ]; then
-        print_info "Cloning coinswap repository for Docker images..."
+        print_info "Cloning Openswap repository for Docker images..."
         git clone --depth 1 --branch "$COINSWAP_BRANCH" "$COINSWAP_REPO" "$COINSWAP_DIR"
     else
-        print_info "Coinswap repository already exists at $COINSWAP_DIR"
+        print_info "Updating Openswap repository at $COINSWAP_DIR..."
+        git -C "$COINSWAP_DIR" remote set-url origin "$COINSWAP_REPO"
+        git -C "$COINSWAP_DIR" fetch --depth 1 origin "$COINSWAP_BRANCH"
+        git -C "$COINSWAP_DIR" checkout --detach FETCH_HEAD
     fi
 }
 
@@ -86,12 +89,12 @@ EOF
 }
 
 build_image() {
-    print_info "Building Coinswap Docker image (branch: ${COINSWAP_BRANCH})..."
+    print_info "Building Openswap Docker image (branch: ${COINSWAP_BRANCH})..."
     cd "$COINSWAP_DIR"
     if docker build -f docker/Dockerfile -t "coinswap/${IMAGE_NAME}:${COINSWAP_BRANCH}" -t "coinswap/${IMAGE_NAME}:latest" .; then
-        print_success "Coinswap image built successfully"
+        print_success "Openswap image built successfully"
     else
-        print_error "Failed to build Coinswap image"
+        print_error "Failed to build Openswap image"
         exit 1
     fi
 }
@@ -178,7 +181,7 @@ stop_stack() {
 
         local container
         for container in "${ALL_MAKERS[@]}"; do
-            docker exec "coinswap-${container}" sh -c "rm -rf /home/coinswap/.coinswap/*" 2>/dev/null || true
+            docker exec "coinswap-${container}" sh -c "rm -rf /home/openswap/.openswap/*" 2>/dev/null || true
         done
 
         docker compose -f "$COMPOSE_FILE" down -v

@@ -82,7 +82,7 @@ services:
 
   # ---- RPC maker (Bitcoin Core backend) ----
   makerd1:
-    image: coinswap/coinswap:electrum-sync
+    image: coinswap/openswap:master
     container_name: coinswap-makerd1
     network_mode: "service:tor"
     depends_on:
@@ -90,8 +90,8 @@ services:
         condition: service_healthy
     command: >
       sh -c 'sleep 1 &&
-      mkdir -p /home/coinswap/.coinswap/maker &&
-      printf "%s\n" "network_port = 16102" "rpc_port = 6102" "socks_port = 9050" "control_port = 9051" "tor_auth_password = coinswap" "min_swap_amount = 10000" "fidelity_amount = 50000" "fidelity_timelock = 13104" > /home/coinswap/.coinswap/maker/config.toml &&
+      mkdir -p /home/openswap/.openswap/maker &&
+      printf "%s\n" "network_port = 16102" "rpc_port = 6102" "socks_port = 9050" "control_port = 9051" "tor_auth_password = coinswap" "min_swap_amount = 10000" "fidelity_amount = 50000" "fidelity_timelock = 13104" > /home/openswap/.openswap/maker/config.toml &&
       makerd -r bitcoind:18442 -z tcp://bitcoind:28332 -a user:password -w makerd1-wallet'
     environment:
       - RUST_LOG=info
@@ -102,7 +102,7 @@ services:
   # docker network (clearnet hostname), so --electrum-tor is NOT needed here;
   # peer-to-peer maker traffic still goes over Tor via network_mode.
   makerd2:
-    image: coinswap/coinswap:electrum-sync
+    image: coinswap/openswap:master
     container_name: coinswap-makerd2
     network_mode: "service:tor"
     depends_on:
@@ -110,8 +110,8 @@ services:
         condition: service_healthy
     command: >
       sh -c 'sleep 2 &&
-      mkdir -p /home/coinswap/.coinswap/maker &&
-      printf "%s\n" "network_port = 16103" "rpc_port = 6103" "socks_port = 9050" "control_port = 9051" "tor_auth_password = coinswap" "min_swap_amount = 10000" "fidelity_amount = 50000" "fidelity_timelock = 13104" > /home/coinswap/.coinswap/maker/config.toml &&
+      mkdir -p /home/openswap/.openswap/maker &&
+      printf "%s\n" "network_port = 16103" "rpc_port = 6103" "socks_port = 9050" "control_port = 9051" "tor_auth_password = coinswap" "min_swap_amount = 10000" "fidelity_amount = 50000" "fidelity_timelock = 13104" > /home/openswap/.openswap/maker/config.toml &&
       makerd --electrum tcp://electrs:50001 -w makerd2-wallet'
     environment:
       - RUST_LOG=info

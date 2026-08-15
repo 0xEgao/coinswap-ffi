@@ -104,6 +104,7 @@ def run_swap(name, data_dir, backend, protocol, addr_type):
             required_confirms=1,
             manually_selected_outpoints=None,
             preferred_makers=None,
+            payment_address=None,
         )
     )
     report = taker.start_coinswap(swap_id=swap_id)

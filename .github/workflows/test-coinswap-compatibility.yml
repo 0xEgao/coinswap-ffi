@@ -227,10 +227,7 @@ jobs:
           mkdir -p "${GITHUB_WORKSPACE}/openswap-ffi/.cargo"
           {
             echo '[patch."https://github.com/citadel-foss/openswap.git"]'
-            printf 'coinswap = { path = "%s" }\n' "${COINSWAP_PATH}"
-            echo
-            echo '[patch."https://github.com/mojoX911/coinswap.git"]'
-            printf 'coinswap = { path = "%s" }\n' "${COINSWAP_PATH}"
+            printf 'openswap = { path = "%s" }\n' "${COINSWAP_PATH}"
           } > "${GITHUB_WORKSPACE}/openswap-ffi/.cargo/config.toml"
 
       - name: Build supported FFI surfaces

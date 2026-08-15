@@ -128,6 +128,7 @@ for (const { name, backend, protocol, addressType } of CASES) {
       makerCount: 2,
       txCount: 1,
       requiredConfirms: 1,
+      paymentAddress: undefined,
     })
     const report = taker.startCoinswap(swapId)
 

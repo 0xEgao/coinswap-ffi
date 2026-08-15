@@ -8,7 +8,9 @@ use crate::types::{
   RPCConfig as RpcConfig, ScriptBuf, SignedAmountSats, SwapReport, Txid, UtxoSpendInfo,
   WalletTxInfo,
 };
-use coinswap::{
+use napi::bindgen_prelude::*;
+use napi_derive::napi;
+use openswap::{
   bitcoin::{
     address::NetworkUnchecked, Address as BitcoinAddress, Amount as csAmount,
     OutPoint as BitcoinOutPoint, Txid as csTxid,
@@ -17,17 +19,15 @@ use coinswap::{
   protocol::ProtocolVersion,
   taker::{
     api::{
-      ConnectionType, SwapParams as CoinswapSwapParams, Taker as CoinswapTaker, TakerInitConfig,
+      ConnectionType, SwapParams as OpenswapSwapParams, Taker as OpenswapTaker, TakerInitConfig,
     },
     offers::{MakerAddress, OfferSyncClient},
   },
   wallet::{
-    ffi, AddressType as csAddressType, BackendConfig as CoinswapBackendConfig,
-    CoreRpcConfig as CoinswapCoreRpcConfig, UTXOSpendInfo as csUtxoSpendInfo,
+    ffi, AddressType as csAddressType, BackendConfig as OpenswapBackendConfig,
+    CoreRpcConfig as OpenswapCoreRpcConfig, UTXOSpendInfo as csUtxoSpendInfo,
   },
 };
-use napi::bindgen_prelude::*;
-use napi_derive::napi;
 use std::{
   path::PathBuf,
   str::FromStr,
@@ -50,7 +50,7 @@ fn checked_satoshi_amount(amount: i64) -> Result<u64> {
   u64::try_from(amount).map_err(|_| napi::Error::from_reason("Amount must be non-negative"))
 }
 
-impl TryFrom<SwapParams> for CoinswapSwapParams {
+impl TryFrom<SwapParams> for OpenswapSwapParams {
   type Error = napi::Error;
 
   fn try_from(params: SwapParams) -> Result<Self> {
@@ -89,7 +89,7 @@ impl TryFrom<SwapParams> for CoinswapSwapParams {
       })
       .transpose()?;
 
-    Ok(CoinswapSwapParams {
+    Ok(OpenswapSwapParams {
       protocol,
       send_amount,
       maker_count: params.maker_count as usize,
@@ -104,7 +104,7 @@ impl TryFrom<SwapParams> for CoinswapSwapParams {
 
 #[napi]
 pub struct Taker {
-  inner: Arc<Mutex<CoinswapTaker>>,
+  inner: Arc<Mutex<OpenswapTaker>>,
   /// Clone-able client for the background offer sync service. Used by the
   /// async sync method so it can run without holding `inner`'s Mutex, leaving
   /// other Taker calls free to proceed concurrently.
@@ -144,7 +144,7 @@ pub struct PollMakerTask {
 }
 
 impl Task for PollMakerTask {
-  type Output = coinswap::taker::offers::MakerOfferCandidate;
+  type Output = openswap::taker::offers::MakerOfferCandidate;
   type JsValue = MakerOfferCandidate;
 
   fn compute(&mut self) -> Result<Self::Output> {
@@ -178,13 +178,13 @@ impl Taker {
   ) -> Result<Self> {
     let data_dir = data_dir.map(PathBuf::from);
     let backend = match backend_config {
-      Some(config) => CoinswapBackendConfig::try_from(config)?,
-      None => CoinswapBackendConfig::CoreRpc(
+      Some(config) => OpenswapBackendConfig::try_from(config)?,
+      None => OpenswapBackendConfig::CoreRpc(
         rpc_config
           .map(|cfg| cfg.into_core_rpc_config(zmq_addr.clone()))
-          .unwrap_or_else(|| CoinswapCoreRpcConfig {
+          .unwrap_or_else(|| OpenswapCoreRpcConfig {
             zmq_addr: zmq_addr.clone(),
-            ..CoinswapCoreRpcConfig::default()
+            ..OpenswapCoreRpcConfig::default()
           }),
       ),
     };
@@ -201,7 +201,7 @@ impl Taker {
       nostr_relays: TakerInitConfig::default().nostr_relays,
     };
 
-    let taker = CoinswapTaker::init(init_config)
+    let taker = OpenswapTaker::init(init_config)
       .map_err(|e| napi::Error::from_reason(format!("Init error: {:?}", e)))?;
 
     let offer_sync = taker.offer_sync_client();
@@ -226,7 +226,7 @@ impl Taker {
       _ => log::LevelFilter::Info,
     };
 
-    coinswap::utill::setup_taker_logger(log_level, false, path);
+    openswap::utill::setup_taker_logger(log_level, false, path);
     Ok(())
   }
 
@@ -268,13 +268,13 @@ impl Taker {
 
   #[napi]
   pub fn prepare_coinswap(&self, swap_params: SwapParams) -> Result<String> {
-    let params = CoinswapSwapParams::try_from(swap_params)?;
+    let params = OpenswapSwapParams::try_from(swap_params)?;
     let mut taker = self
       .inner
       .lock()
       .map_err(|e| napi::Error::from_reason(format!("Failed to acquire taker lock: {}", e)))?;
     let summary = taker
-      .prepare_coinswap(params)
+      .prepare_swap(params)
       .map_err(|e| napi::Error::from_reason(format!("Prepare coinswap error: {:?}", e)))?;
     Ok(summary.swap_id)
   }
@@ -286,7 +286,7 @@ impl Taker {
       .lock()
       .map_err(|e| napi::Error::from_reason(format!("Failed to acquire taker lock: {}", e)))?;
     let report = taker
-      .start_coinswap(&swap_id)
+      .start_swap(&swap_id)
       .map_err(|e| napi::Error::from_reason(format!("Start coinswap error: {:?}", e)))?;
     Ok(SwapReport::from(report))
   }
@@ -596,7 +596,7 @@ impl Taker {
     ffi::restore_wallet_gui_app(
       data_dir,
       wallet_file_name,
-      CoinswapBackendConfig::CoreRpc(rpc_config.into()),
+      OpenswapBackendConfig::CoreRpc(rpc_config.into()),
       backup_file.into(),
       password,
     );
@@ -752,7 +752,7 @@ impl Taker {
   pub fn is_wallet_encrypted(wallet_path: String) -> Result<bool> {
     let path = PathBuf::from(wallet_path);
 
-    coinswap::wallet::Wallet::is_wallet_encrypted(&path)
+    openswap::wallet::Wallet::is_wallet_encrypted(&path)
       .map_err(|e| napi::Error::from_reason(format!("Failed to check wallet encryption: {:?}", e)))
   }
 
@@ -772,9 +772,9 @@ impl Taker {
 
 #[cfg(test)]
 mod tests {
-  use super::{checked_satoshi_amount, CoinswapSwapParams, SwapParams};
+  use super::{checked_satoshi_amount, OpenswapSwapParams, SwapParams};
   use crate::types::{Amount, FidelityBond, LockTime, OutPoint, PublicKey};
-  use coinswap::bitcoin::absolute::LockTime as csLockTime;
+  use openswap::bitcoin::absolute::LockTime as csLockTime;
 
   #[test]
   fn negative_swap_amount_is_rejected() {
@@ -789,7 +789,7 @@ mod tests {
       payment_address: None,
     };
 
-    assert!(CoinswapSwapParams::try_from(params).is_err());
+    assert!(OpenswapSwapParams::try_from(params).is_err());
   }
 
   #[test]

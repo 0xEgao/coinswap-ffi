@@ -3,7 +3,7 @@
 //! This module contains types that are used across multiple modules
 //! to avoid duplicate type definitions across language bindings.
 
-use coinswap::{
+use openswap::{
     bitcoin::{
         Address as csAddress, Amount as csAmount, OutPoint as coinswapOutPoint,
         PublicKey as csPublicKey, ScriptBuf as csScriptBuf, SignedAmount, Txid as csTxid,
@@ -13,16 +13,16 @@ use coinswap::{
     fee_estimation::{BlockTarget, FeeEstimator},
     protocol::common_messages::{FidelityProof as csFidelityProof, Offer as csOffer},
     taker::{
-        error::TakerError as CoinswapTakerError,
+        error::TakerError as OpenswapTakerError,
         offers::{
             MakerAddress as csMakerAddress, MakerOfferCandidate as csMakerOfferCandidate,
             MakerProtocol as csMakerProtocol, MakerState as csMakerState, OfferBook as csOfferBook,
         },
     },
     wallet::{
-        AddressType as csAddressType, BackendConfig as CoinswapBackendConfig,
-        Balances as CoinswapBalances, CoreRpcConfig as CoinswapCoreRpcConfig,
-        ElectrumConfig as CoinswapElectrumConfig, FidelityBond as csFidelityBond,
+        AddressType as csAddressType, BackendConfig as OpenswapBackendConfig,
+        Balances as OpenswapBalances, CoreRpcConfig as OpenswapCoreRpcConfig,
+        ElectrumConfig as OpenswapElectrumConfig, FidelityBond as csFidelityBond,
         ffi::{
             MakerFeeInfo as csMakerFeeInfo, TakerReport as csTakerReport,
             restore_wallet_gui_app as cs_restore_wallet_gui_app,
@@ -45,8 +45,8 @@ pub struct RPCConfig {
 }
 
 impl RPCConfig {
-    pub fn into_core_rpc_config(self, zmq_addr: String) -> CoinswapCoreRpcConfig {
-        CoinswapCoreRpcConfig {
+    pub fn into_core_rpc_config(self, zmq_addr: String) -> OpenswapCoreRpcConfig {
+        OpenswapCoreRpcConfig {
             url: self.url,
             auth: Auth::UserPass(self.username, self.password),
             wallet_name: self.wallet_name,
@@ -55,7 +55,7 @@ impl RPCConfig {
     }
 }
 
-impl From<RPCConfig> for CoinswapCoreRpcConfig {
+impl From<RPCConfig> for OpenswapCoreRpcConfig {
     fn from(config: RPCConfig) -> Self {
         let default = Self::default();
         Self {
@@ -92,7 +92,7 @@ pub struct BackendConfig {
     pub max_retries: Option<u8>,
 }
 
-impl TryFrom<BackendConfig> for CoinswapBackendConfig {
+impl TryFrom<BackendConfig> for OpenswapBackendConfig {
     type Error = TakerError;
 
     fn try_from(config: BackendConfig) -> Result<Self, Self::Error> {
@@ -107,8 +107,8 @@ impl TryFrom<BackendConfig> for CoinswapBackendConfig {
 }
 
 impl BackendConfig {
-    fn into_rpc_backend(self) -> Result<CoinswapBackendConfig, TakerError> {
-        let mut config = CoinswapCoreRpcConfig::default();
+    fn into_rpc_backend(self) -> Result<OpenswapBackendConfig, TakerError> {
+        let mut config = OpenswapCoreRpcConfig::default();
         apply_if_some(&mut config.url, self.url);
         apply_if_some(&mut config.wallet_name, self.wallet_name);
         apply_if_some(&mut config.zmq_addr, self.zmq_addr);
@@ -121,21 +121,21 @@ impl BackendConfig {
                 });
             }
         };
-        Ok(CoinswapBackendConfig::CoreRpc(config))
+        Ok(OpenswapBackendConfig::CoreRpc(config))
     }
 
-    fn into_electrum_backend(self) -> Result<CoinswapBackendConfig, TakerError> {
-        let mut config = CoinswapElectrumConfig {
+    fn into_electrum_backend(self) -> Result<OpenswapBackendConfig, TakerError> {
+        let mut config = OpenswapElectrumConfig {
             url: self.url.ok_or_else(|| TakerError::General {
                 msg: "Electrum backend requires url".to_string(),
             })?,
-            ..CoinswapElectrumConfig::default()
+            ..OpenswapElectrumConfig::default()
         };
         config.socks5 = self.socks5;
         config.timeout = self.timeout;
         config.poll_interval_secs = self.poll_interval_secs;
         apply_if_some(&mut config.max_retries, self.max_retries);
-        Ok(CoinswapBackendConfig::Electrum(config))
+        Ok(OpenswapBackendConfig::Electrum(config))
     }
 }
 
@@ -168,14 +168,14 @@ pub enum TakerError {
     IO { msg: String },
 }
 
-impl From<CoinswapTakerError> for TakerError {
-    fn from(error: CoinswapTakerError) -> Self {
+impl From<OpenswapTakerError> for TakerError {
+    fn from(error: OpenswapTakerError) -> Self {
         match error {
-            CoinswapTakerError::Wallet(e) => TakerError::Wallet {
+            OpenswapTakerError::Wallet(e) => TakerError::Wallet {
                 msg: format!("{:?}", e),
             },
-            CoinswapTakerError::General(msg) => TakerError::General { msg },
-            CoinswapTakerError::IO(e) => TakerError::IO { msg: e.to_string() },
+            OpenswapTakerError::General(msg) => TakerError::General { msg },
+            OpenswapTakerError::IO(e) => TakerError::IO { msg: e.to_string() },
             _ => TakerError::General {
                 msg: format!("Taker error: {:?}", error),
             },
@@ -210,8 +210,8 @@ pub struct Balances {
     pub spendable: i64,
 }
 
-impl From<CoinswapBalances> for Balances {
-    fn from(balances: CoinswapBalances) -> Self {
+impl From<OpenswapBalances> for Balances {
+    fn from(balances: OpenswapBalances) -> Self {
         Self {
             regular: balances.regular.to_sat() as i64,
             swap: balances.swap.to_sat() as i64,
@@ -844,7 +844,7 @@ pub fn restore_wallet_gui_app(
     cs_restore_wallet_gui_app(
         data_dir,
         wallet_file_name,
-        CoinswapBackendConfig::CoreRpc(rpc_config.into()),
+        OpenswapBackendConfig::CoreRpc(rpc_config.into()),
         backup_file_path.into(),
         password,
     );
@@ -855,7 +855,7 @@ pub fn restore_wallet_gui_app(
 pub fn is_wallet_encrypted(wallet_path: String) -> Result<bool, TakerError> {
     let path = PathBuf::from(wallet_path);
 
-    coinswap::wallet::Wallet::is_wallet_encrypted(&path).map_err(|e| TakerError::Wallet {
+    openswap::wallet::Wallet::is_wallet_encrypted(&path).map_err(|e| TakerError::Wallet {
         msg: format!("Failed to check wallet encryption: {:?}", e),
     })
 }
@@ -892,6 +892,6 @@ pub fn setup_logging(
         "off" => log::LevelFilter::Off,
         _ => log::LevelFilter::Info,
     };
-    coinswap::utill::setup_taker_logger(level, to_stdout, path);
+    openswap::utill::setup_taker_logger(level, to_stdout, path);
     Ok(())
 }
