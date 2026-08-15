@@ -9,7 +9,10 @@ use crate::types::{
   WalletTxInfo,
 };
 use coinswap::{
-  bitcoin::{Amount as csAmount, OutPoint as BitcoinOutPoint, Txid as csTxid},
+  bitcoin::{
+    address::NetworkUnchecked, Address as BitcoinAddress, Amount as csAmount,
+    OutPoint as BitcoinOutPoint, Txid as csTxid,
+  },
   fee_estimation::{BlockTarget, FeeEstimator},
   protocol::ProtocolVersion,
   taker::{
@@ -28,7 +31,7 @@ use napi_derive::napi;
 use std::{
   path::PathBuf,
   str::FromStr,
-  sync::{Arc, Mutex},
+  sync::{atomic::AtomicBool, Arc, Mutex},
 };
 
 #[napi(object)]
@@ -40,6 +43,7 @@ pub struct SwapParams {
   pub required_confirms: Option<u32>,
   pub manually_selected_outpoints: Option<Vec<OutPoint>>,
   pub preferred_makers: Option<Vec<String>>,
+  pub payment_address: Option<String>,
 }
 
 fn checked_satoshi_amount(amount: i64) -> Result<u64> {
@@ -77,6 +81,14 @@ impl TryFrom<SwapParams> for CoinswapSwapParams {
       })
       .transpose()?;
 
+    let payment_address = params
+      .payment_address
+      .map(|address| {
+        BitcoinAddress::<NetworkUnchecked>::from_str(&address)
+          .map_err(|e| napi::Error::from_reason(format!("Invalid payment address: {}", e)))
+      })
+      .transpose()?;
+
     Ok(CoinswapSwapParams {
       protocol,
       send_amount,
@@ -85,6 +97,7 @@ impl TryFrom<SwapParams> for CoinswapSwapParams {
       required_confirms: params.required_confirms.unwrap_or(1),
       manually_selected_outpoints,
       preferred_makers: params.preferred_makers,
+      payment_address,
     })
   }
 }
@@ -665,7 +678,7 @@ impl Taker {
       .get_wallet()
       .write()
       .map_err(|e| napi::Error::from_reason(format!("Failed to acquire wallet lock: {}", e)))?
-      .sync_and_save()
+      .sync_and_save(&AtomicBool::new(false))
       .map_err(|e| napi::Error::from_reason(format!("Sync wallet error: {:?}", e)))?;
     Ok(())
   }
@@ -773,6 +786,7 @@ mod tests {
       required_confirms: None,
       manually_selected_outpoints: None,
       preferred_makers: None,
+      payment_address: None,
     };
 
     assert!(CoinswapSwapParams::try_from(params).is_err());

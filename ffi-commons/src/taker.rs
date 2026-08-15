@@ -12,7 +12,10 @@ use crate::{
     },
 };
 use coinswap::{
-    bitcoin::{Amount as coinswapAmount, OutPoint as coinswapOutPoint, Txid as coinswapTxid},
+    bitcoin::{
+        Address as CoinswapAddress, Amount as coinswapAmount, OutPoint as coinswapOutPoint,
+        Txid as coinswapTxid, address::NetworkUnchecked,
+    },
     protocol::ProtocolVersion,
     taker::api::{
         ConnectionType, SwapParams as CoinswapSwapParams, Taker as CoinswapTaker, TakerInitConfig,
@@ -47,6 +50,8 @@ pub struct SwapParams {
     pub manually_selected_outpoints: Option<Vec<OutPoint>>,
     /// Optional explicit maker addresses.
     pub preferred_makers: Option<Vec<String>>,
+    /// Optional third-party address that receives the settled swap amount.
+    pub payment_address: Option<String>,
 }
 
 fn checked_satoshi_amount(amount: i64) -> Result<u64, TakerError> {
@@ -90,6 +95,17 @@ impl TryFrom<SwapParams> for CoinswapSwapParams {
             })
             .transpose()?;
 
+        let payment_address = params
+            .payment_address
+            .map(|address| {
+                address
+                    .parse::<CoinswapAddress<NetworkUnchecked>>()
+                    .map_err(|e| TakerError::General {
+                        msg: format!("Invalid payment address: {}", e),
+                    })
+            })
+            .transpose()?;
+
         Ok(CoinswapSwapParams {
             protocol,
             send_amount,
@@ -98,6 +114,7 @@ impl TryFrom<SwapParams> for CoinswapSwapParams {
             required_confirms: params.required_confirms.unwrap_or(1),
             manually_selected_outpoints,
             preferred_makers: params.preferred_makers,
+            payment_address,
         })
     }
 }

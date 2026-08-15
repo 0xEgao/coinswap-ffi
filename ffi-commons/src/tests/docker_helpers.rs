@@ -252,6 +252,7 @@ pub fn run_swap(swap: &Swap, send: u64) {
             required_confirms: Some(1),
             manually_selected_outpoints: None,
             preferred_makers: None,
+            payment_address: None,
         })
         .expect("prepare_coinswap");
     let report = taker.start_coinswap(swap_id).expect("start_coinswap");

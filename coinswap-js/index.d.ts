@@ -224,6 +224,7 @@ export interface SwapParams {
   requiredConfirms?: number
   manuallySelectedOutpoints?: Array<OutPoint>
   preferredMakers?: Array<string>
+  paymentAddress?: string
 }
 
 export interface SwapReport {
