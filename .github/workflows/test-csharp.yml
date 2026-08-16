@@ -40,6 +40,7 @@ jobs:
             rid: linux-x64
             build_script: build-linux.sh
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
 
     steps:
       - name: Checkout repository
@@ -115,7 +116,7 @@ jobs:
         working-directory: ./ffi-commons
         run: |
           chmod +x ffi-docker-setup
-          if docker pull coinswap/bitcoin-mutinynet:latest && docker pull coinswap/coinswap:electrum-sync; then
+          if docker pull coinswap/bitcoin-mutinynet:latest && docker pull coinswap/openswap:master; then
             echo "Using prebuilt Docker images"
           else
             echo "Prebuilt image pull failed; falling back to local image build"
@@ -142,35 +143,45 @@ jobs:
             sleep 2
           done
 
-      - name: Wait for Tor egress then makers
+      - name: Wait for local makers
         run: |
-          # An open control port doesn't mean Tor can build circuits; probe real egress to a public relay, then poll both makers until each has set up and announced (empty offerbook otherwise => NotEnoughMakersInOfferBook).
-          for i in {1..60}; do
-            for relay in nos.lol relay.damus.io; do
-              curl -s --max-time 20 --socks5-hostname 127.0.0.1:9050 "https://$relay" -o /dev/null && { echo "Tor egress OK via $relay (attempt $i)"; tor_ok=1; break; }
-            done
-            [ -n "$tor_ok" ] && break
-            echo "waiting for Tor egress ($i/60)..."; sleep 5
-          done
-          [ -n "$tor_ok" ] || { echo "Timed out waiting for Tor egress"; exit 1; }
+          # The test polls these exact onion addresses, avoiding unrelated
+          # makers announced by concurrent CI jobs on public Nostr relays.
           for i in {1..60}; do
             ok=true
             for m in makerd1 makerd2; do
               setup=$(docker logs "coinswap-$m" 2>&1 | grep -c "Server setup complete" || true)
-              announced=$(docker logs "coinswap-$m" 2>&1 | grep -c "Nostr relay accepted" || true)
-              if [ "$setup" -ge 1 ] && [ "$announced" -ge 1 ]; then
-                echo "  $m ready (setup=$setup announced=$announced)"
+              onion=$(docker logs "coinswap-$m" 2>&1 | grep -c "Generated new Tor Hidden Service Hostname" || true)
+              if [ "$setup" -ge 1 ] && [ "$onion" -ge 1 ]; then
+                echo "  $m ready (setup=$setup onion=$onion)"
               else
-                echo "  $m not ready (setup=$setup announced=$announced)"; ok=false
+                echo "  $m not ready (setup=$setup onion=$onion)"; ok=false
               fi
             done
-            $ok && { echo "both makers announced (attempt $i)"; break; }
-            echo "waiting for makers ($i/60)..."; sleep 10
+            $ok && { echo "both local makers ready (attempt $i)"; break; }
+            echo "waiting for makers ($i/60)..."; sleep 5
           done
+          $ok || { echo "Timed out waiting for local makers"; exit 1; }
 
       - name: Test
         working-directory: coinswap-csharp
-        run: dotnet test Coinswap.Tests/Coinswap.Tests.csproj -c Release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The native Taker is intentionally retained because dropping it can
+          # block on its background services. Run each live swap in a fresh
+          # testhost so completed takers cannot accumulate Tor connections and
+          # starve a later case with EAGAIN (os error 11).
+          dotnet build Coinswap.Tests/Coinswap.Tests.csproj -c Release
+          for test_case in LegacyRpc TaprootRpc LegacyElectrum TaprootElectrum; do
+            echo "Running C# swap test: ${test_case}"
+            timeout --signal=TERM 10m \
+              dotnet test Coinswap.Tests/Coinswap.Tests.csproj \
+                -c Release \
+                --no-build \
+                --filter "FullyQualifiedName=Coinswap.Tests.SwapTest.${test_case}"
+          done
 
       - name: Cleanup Docker environment
         if: always()
@@ -183,6 +194,6 @@ jobs:
         with:
           name: csharp-test-logs
           path: |
-            ~/.coinswap/taker/debug.log
+            ~/.openswap/taker/debug.log
             ffi-commons/.coinswap-docker-stack/logs/
           retention-days: 7

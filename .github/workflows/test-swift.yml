@@ -22,7 +22,7 @@ permissions: {}
 jobs:
   test:
     name: "Test Swift library"
-    runs-on: macos-15-intel 
+    runs-on: macos-15-intel
     defaults:
       run:
         working-directory: ./coinswap-swift
@@ -47,15 +47,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Cache SwiftPM build artifacts
+      - name: Cache SwiftPM dependencies
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.swiftpm/
-            coinswap-swift/.build/
-          key: ${{ runner.os }}-swiftpm-${{ hashFiles('coinswap-swift/Package.swift', 'coinswap-swift/Package.resolved') }}
+          # Do not cache .build: Swift PCH files embed the absolute checkout
+          # path and cannot be reused after a repository rename or relocation.
+          path: ~/.swiftpm/
+          key: ${{ runner.os }}-swiftpm-v2-${{ hashFiles('coinswap-swift/Package.swift', 'coinswap-swift/Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-swiftpm-
+            ${{ runner.os }}-swiftpm-v2-
+
+      - name: Clean SwiftPM build artifacts
+        run: swift package clean
 
       - name: Setup Docker on macOS
         uses: douglascamata/setup-docker-macos-action@v1.1.0
@@ -71,7 +74,7 @@ jobs:
         working-directory: ./ffi-commons
         run: |
           chmod +x ffi-docker-setup
-          if docker pull coinswap/bitcoin-mutinynet:latest && docker pull coinswap/coinswap:electrum-sync; then
+          if docker pull coinswap/bitcoin-mutinynet:latest && docker pull coinswap/openswap:master; then
             echo "Using prebuilt Docker images"
           else
             echo "Prebuilt image pull failed; falling back to local image build"
@@ -122,33 +125,28 @@ jobs:
       - name: "Build Swift package"
         run: bash ./build-xcframework-ci.sh
 
-      - name: Wait for Tor egress then makers
+      - name: Wait for local makers
         run: |
-          # An open control port doesn't mean Tor can build circuits; probe real egress to a public relay, then poll both makers until each has set up and announced (empty offerbook otherwise => NotEnoughMakersInOfferBook).
-          for i in {1..60}; do
-            for relay in nos.lol relay.damus.io; do
-              curl -s --max-time 20 --socks5-hostname 127.0.0.1:9050 "https://$relay" -o /dev/null && { echo "Tor egress OK via $relay (attempt $i)"; tor_ok=1; break; }
-            done
-            [ -n "$tor_ok" ] && break
-            echo "waiting for Tor egress ($i/60)..."; sleep 5
-          done
-          [ -n "$tor_ok" ] || { echo "Timed out waiting for Tor egress"; exit 1; }
+          # The test polls these exact onion addresses, avoiding unrelated
+          # makers announced by concurrent CI jobs on public Nostr relays.
           for i in {1..60}; do
             ok=true
             for m in makerd1 makerd2; do
               setup=$(docker logs "coinswap-$m" 2>&1 | grep -c "Server setup complete" || true)
-              announced=$(docker logs "coinswap-$m" 2>&1 | grep -c "Nostr relay accepted" || true)
-              if [ "$setup" -ge 1 ] && [ "$announced" -ge 1 ]; then
-                echo "  $m ready (setup=$setup announced=$announced)"
+              onion=$(docker logs "coinswap-$m" 2>&1 | grep -c "Generated new Tor Hidden Service Hostname" || true)
+              if [ "$setup" -ge 1 ] && [ "$onion" -ge 1 ]; then
+                echo "  $m ready (setup=$setup onion=$onion)"
               else
-                echo "  $m not ready (setup=$setup announced=$announced)"; ok=false
+                echo "  $m not ready (setup=$setup onion=$onion)"; ok=false
               fi
             done
-            $ok && { echo "both makers announced (attempt $i)"; break; }
-            echo "waiting for makers ($i/60)..."; sleep 10
+            $ok && { echo "both local makers ready (attempt $i)"; break; }
+            echo "waiting for makers ($i/60)..."; sleep 5
           done
+          $ok || { echo "Timed out waiting for local makers"; exit 1; }
 
       - name: "Run Swift live swap tests (backend x protocol matrix)"
+        timeout-minutes: 25
         run: sudo -E swift test --filter LiveSwapTests
 
       - name: Cleanup Docker environment

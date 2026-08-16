@@ -107,6 +107,7 @@ class SwapTest {
                 requiredConfirms = 1u,
                 manuallySelectedOutpoints = null,
                 preferredMakers = null,
+                paymentAddress = null,
             ),
         )
         val report = taker.startCoinswap(swapId)

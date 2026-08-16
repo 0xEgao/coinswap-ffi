@@ -76,7 +76,8 @@ func waitForSpendable(_ taker: Taker, target: Int64) throws -> Balances {
     return try taker.getBalances()
 }
 
-func runProcess(command: String, args: [String]) throws {
+@discardableResult
+func runProcess(command: String, args: [String]) throws -> String {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/bash")
     let fullCommand = ([command] + args).joined(separator: " ")
@@ -87,15 +88,16 @@ func runProcess(command: String, args: [String]) throws {
     process.standardError = pipe
 
     try process.run()
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
     process.waitUntilExit()
+    let output = String(data: data, encoding: .utf8) ?? ""
 
     if process.terminationStatus != 0 {
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8) ?? ""
         throw NSError(domain: "CoinswapLiveTests", code: Int(process.terminationStatus), userInfo: [
             NSLocalizedDescriptionKey: "Command failed: \(command) \(args.joined(separator: " "))\n\(output)"
         ])
     }
+    return output
 }
 
 /// Cleans up a specific wallet in ~/.coinswap/taker/wallets before running tests.

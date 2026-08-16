@@ -123,7 +123,8 @@ def run_swap(name, backend, protocol, addr_type)
     tx_count: 1,
     required_confirms: 1,
     manually_selected_outpoints: nil,
-    preferred_makers: nil
+    preferred_makers: nil,
+    payment_address: nil
   )
   swap_id = taker.prepare_coinswap(swap_params)
   report = taker.start_coinswap(swap_id)

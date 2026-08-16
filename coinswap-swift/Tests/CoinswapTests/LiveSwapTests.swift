@@ -11,6 +11,12 @@ import Coinswap
 final class LiveSwapTests: XCTestCase {
     /// Sats swapped per taker (funded with 1.0 BTC, well above this).
     private let swapAmount: UInt64 = 500_000
+    private let makerCount: UInt32 = 2
+    private static let makerContainers = ["coinswap-makerd1", "coinswap-makerd2"]
+    private static let retentionLock = NSLock()
+    /// Keep native takers alive until this dedicated test process exits. Their
+    /// upstream watcher destructor can otherwise block the language-binding CI.
+    private static var liveTakers: [Taker] = []
 
     func testLegacyRpc() throws {
         try runSwap(name: "legacyRpc", backend: .rpc, protocol: "Legacy",
@@ -50,6 +56,7 @@ final class LiveSwapTests: XCTestCase {
         // Electrum backend: rpcConfig nil + electrum BackendConfig.
         let rpcConfig: RpcConfig? = backend == .rpc ? config.rpcConfig : nil
         let backendConfig: BackendConfig? = backend == .electrum ? electrumBackendConfig() : nil
+        let makerAddresses = try localMakerAddresses()
 
         let taker = try Taker.`init`(
             dataDir: config.dataDir,
@@ -59,12 +66,17 @@ final class LiveSwapTests: XCTestCase {
             torAuthPassword: config.torAuthPassword,
             zmqAddr: config.zmqAddr,
             password: config.walletPassword,
-            nostrRelays: nil,
+            // Public Nostr cannot isolate concurrent, independent regtest jobs.
+            nostrRelays: [],
             backendConfig: backendConfig
         )
+        Self.retentionLock.lock()
+        Self.liveTakers.append(taker)
+        Self.retentionLock.unlock()
 
         try taker.setupLogging(dataDir: config.dataDir, logLevel: "Info")
-        try taker.syncOfferbookAndWait()
+        try waitForSuitableMakers(
+            taker, name: name, protocol: proto, addresses: makerAddresses)
         XCTAssertEqual(try taker.getWalletName(), config.walletName)
 
         // Fund with 0.25 BTC across 4 fresh external addresses (1.0 BTC total),
@@ -79,11 +91,12 @@ final class LiveSwapTests: XCTestCase {
         let params = SwapParams(
             protocol: proto,
             sendAmount: swapAmount,
-            makerCount: 2,
+            makerCount: makerCount,
             txCount: 1,
             requiredConfirms: 1,
             manuallySelectedOutpoints: nil,
-            preferredMakers: nil
+            preferredMakers: makerAddresses,
+            paymentAddress: nil
         )
         let swapId = try taker.prepareCoinswap(swapParams: params)
         let report = try taker.startCoinswap(swapId: swapId)
@@ -98,6 +111,78 @@ final class LiveSwapTests: XCTestCase {
 
         print("✓ \(name) passed (swap_id \(report.swapId))")
         fflush(stdout)
+    }
+
+    /// Read the two onion addresses belonging to this job's Docker stack.
+    private func localMakerAddresses() throws -> [String] {
+        let marker = "Generated new Tor Hidden Service Hostname:"
+        return try Self.makerContainers.map { container in
+            let logs = try runProcess(command: "docker", args: ["logs", container])
+            let matches = logs.split(whereSeparator: \.isNewline).compactMap { line -> String? in
+                guard let markerRange = line.range(of: marker) else { return nil }
+                return line[markerRange.upperBound...].split(whereSeparator: \.isWhitespace)
+                    .first.map(String.init)
+            }
+            guard let address = matches.last else {
+                throw NSError(
+                    domain: "CoinswapLiveTests", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey:
+                        "\(container): maker onion address not found in logs"])
+            }
+            return address
+        }
+    }
+
+    /// Poll only this job's makers and wait for two usable offers.
+    private func waitForSuitableMakers(
+        _ taker: Taker, name: String, protocol proto: String, addresses: [String]
+    ) throws {
+        let attempts = 3
+        var suitableCount = 0
+
+        for attempt in 1...attempts {
+            for address in addresses {
+                do {
+                    print("  polling local maker \(address)")
+                    _ = try taker.pollMaker(address: address)
+                } catch {
+                    print("  poll failed for \(address): \(error)")
+                }
+            }
+
+            let offerbook = try taker.fetchOffers()
+            let suitable = offerbook.makers.filter { maker in
+                maker.state.stateType == "Good"
+                    && (maker.protocol?.protocolType == proto
+                        || maker.protocol?.protocolType == "Unified")
+                    && maker.offer != nil
+                    && maker.offer!.minSize <= Int64(swapAmount)
+                    && Int64(swapAmount) <= maker.offer!.maxSize
+            }
+            suitableCount = suitable.count
+            print(
+                "\(name): offerbook attempt \(attempt)/\(attempts): " +
+                "\(offerbook.makers.count) total, \(suitableCount) suitable \(proto) makers")
+            for maker in offerbook.makers {
+                let makerProtocol = maker.protocol?.protocolType ?? "None"
+                let amountRange = maker.offer.map {
+                    "\($0.minSize)..\($0.maxSize) sats"
+                } ?? "no offer"
+                print(
+                    "  \(maker.address.address): state=\(maker.state.stateType), " +
+                    "protocol=\(makerProtocol), amount=\(amountRange)")
+            }
+            fflush(stdout)
+
+            if suitableCount >= Int(makerCount) { return }
+            if attempt < attempts { Thread.sleep(forTimeInterval: 10) }
+        }
+
+        throw NSError(
+            domain: "CoinswapLiveTests", code: 1,
+            userInfo: [NSLocalizedDescriptionKey:
+                "\(name): expected \(makerCount) suitable \(proto) makers for " +
+                "\(swapAmount) sats, found \(suitableCount)"])
     }
 
     /// Funds `taker` with 0.25 BTC across 4 fresh external addresses.

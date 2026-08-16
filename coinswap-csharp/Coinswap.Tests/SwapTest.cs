@@ -23,10 +23,14 @@ public class SwapTest
     private const string ZmqAddr = "tcp://localhost:28332";
     private const string ElectrumUrl = "tcp://localhost:50001";
     private const ushort ControlPort = 9051;
-    private static readonly string[] NostrRelays = ["wss://nos.lol", "wss://relay.damus.io"];
+    private static readonly string[] MakerContainers = ["coinswap-makerd1", "coinswap-makerd2"];
 
     /// <summary>Amount swapped by each taker, in sats. The taker is funded with 2×.</summary>
     private const ulong SwapAmount = 500_000;
+    private const uint MakerCount = 2;
+    private const int MakerReadyAttempts = 3;
+    private const int MakerReadyRetryMs = 10_000;
+    private static readonly List<Taker> LiveTestTakers = [];
 
     private enum Backend { Rpc, Electrum }
 
@@ -84,10 +88,12 @@ public class SwapTest
         if (backend == Backend.Rpc)
             CleanupBitcoindWallet(rpcWalletName);
 
+        var makerAddresses = LocalMakerAddresses();
+
         // Positional args mirror the Rust `Taker::init` signature order:
         // (data_dir, wallet_file_name, rpc_config, control_port, tor_auth_password,
         //  zmq_addr, password, nostr_relays, backend_config).
-        using var taker = Taker.Init(
+        var taker = Taker.Init(
             dataDir,
             name,
             rpcConfig,
@@ -95,10 +101,14 @@ public class SwapTest
             "coinswap",
             ZmqAddr,
             "",
-            NostrRelays,
+            // Each CI job owns an isolated regtest chain. Avoid public discovery,
+            // which may return makers announced by unrelated concurrent jobs.
+            Array.Empty<string>(),
             backendConfig);
+        lock (LiveTestTakers)
+            LiveTestTakers.Add(taker);
 
-        taker.SyncOfferbookAndWait();
+        WaitForSuitableMakers(taker, name, protocol, makerAddresses);
 
         // Fund with 2× the swap amount across 4 fresh external addresses.
         const string quarterBtc = "0.0025"; // 250,000 sats; 4× = 1,000,000 = 2 × SwapAmount
@@ -116,19 +126,114 @@ public class SwapTest
         var swapId = taker.PrepareCoinswap(new SwapParams(
             Protocol: protocol,
             SendAmount: SwapAmount,
-            MakerCount: 2,
+            MakerCount: MakerCount,
             TxCount: 1,
             RequiredConfirms: 1,
             ManuallySelectedOutpoints: null,
-            PreferredMakers: null));
+            PreferredMakers: makerAddresses.ToArray(),
+            PaymentAddress: null));
 
         var report = taker.StartCoinswap(swapId);
         Assert.NotNull(report);
         Assert.True(report.MakersCount.HasValue, $"{name}: swap report should include maker count");
-        Assert.Equal(2u, report.MakersCount.Value);
+        Assert.Equal(MakerCount, report.MakersCount.Value);
         Assert.Contains("SUCCESS", report.Status.ToUpperInvariant());
 
         _out.WriteLine($"✓ {name} passed (swap_id {report.SwapId})");
+    }
+
+    /// <summary>Wait for two usable offers and explicitly re-poll transient failures.</summary>
+    private void WaitForSuitableMakers(
+        Taker taker, string name, string protocol, IReadOnlyList<string> makerAddresses)
+    {
+        var lastSuitableCount = 0;
+
+        for (var attempt = 1; attempt <= MakerReadyAttempts; attempt++)
+        {
+            foreach (var address in makerAddresses)
+            {
+                try
+                {
+                    _out.WriteLine($"  polling local maker {address}");
+                    taker.PollMaker(address);
+                }
+                catch (Exception error)
+                {
+                    _out.WriteLine($"  poll failed for {address}: {error.Message}");
+                }
+            }
+
+            var offerbook = taker.FetchOffers();
+            lastSuitableCount = PrintOfferbook(name, protocol, offerbook, attempt);
+            if (lastSuitableCount >= MakerCount) return;
+
+            if (attempt < MakerReadyAttempts)
+                Thread.Sleep(MakerReadyRetryMs);
+        }
+
+        throw new InvalidOperationException(
+            $"{name}: expected {MakerCount} suitable {protocol} makers for " +
+            $"{SwapAmount} sats, found {lastSuitableCount}");
+    }
+
+    /// <summary>Print maker states and return the number suitable for this swap.</summary>
+    private int PrintOfferbook(string name, string protocol, OfferBook offerbook, int attempt)
+    {
+        var suitable = offerbook.Makers.Where(maker =>
+            maker.State.StateType == "Good"
+            && maker.Protocol is not null
+            && (maker.Protocol.ProtocolType == protocol || maker.Protocol.ProtocolType == "Unified")
+            && maker.Offer is not null
+            && maker.Offer.MinSize <= (long)SwapAmount
+            && (long)SwapAmount <= maker.Offer.MaxSize
+        ).ToList();
+
+        _out.WriteLine(
+            $"{name}: offerbook attempt {attempt}/{MakerReadyAttempts}: " +
+            $"{offerbook.Makers.Length} total, {suitable.Count} suitable {protocol} makers");
+
+        foreach (var maker in offerbook.Makers)
+        {
+            var makerProtocol = maker.Protocol?.ProtocolType ?? "None";
+            var amountRange = maker.Offer is null
+                ? "no offer"
+                : $"{maker.Offer.MinSize}..{maker.Offer.MaxSize} sats";
+            _out.WriteLine(
+                $"  {maker.Address.Address}: state={maker.State.StateType}, " +
+                $"protocol={makerProtocol}, amount={amountRange}");
+        }
+
+        return suitable.Count;
+    }
+
+    /// <summary>Read the two onion addresses belonging to this job's Docker stack.</summary>
+    private static IReadOnlyList<string> LocalMakerAddresses()
+    {
+        const string marker = "Generated new Tor Hidden Service Hostname:";
+        var addresses = new List<string>();
+
+        foreach (var container in MakerContainers)
+        {
+            var (code, stdout, stderr) = RunDocker("logs", container);
+            if (code != 0)
+                throw new InvalidOperationException($"{container}: failed to read maker logs: {stderr}");
+
+            string? address = null;
+            foreach (var line in (stdout + "\n" + stderr).Split('\n'))
+            {
+                var markerIndex = line.IndexOf(marker, StringComparison.Ordinal);
+                if (markerIndex < 0) continue;
+                address = line[(markerIndex + marker.Length)..]
+                    .Trim()
+                    .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)[0];
+            }
+
+            if (address is null)
+                throw new InvalidOperationException($"{container}: maker onion address not found in logs");
+            addresses.Add(address);
+        }
+
+        return addresses;
     }
 
     /// <summary>Removes a stale Docker-hosted taker wallet from prior test runs.</summary>
