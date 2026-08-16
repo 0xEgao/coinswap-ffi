@@ -2,7 +2,7 @@
 //!
 //! One test drives four takers sequentially against the Docker regtest stack
 //! (1 RPC maker + 1 Electrum maker), covering the full backend × protocol
-//! matrix. Each taker funds a fresh wallet and runs a 2-maker coinswap.
+//! matrix. Each taker funds a fresh wallet and runs a 2-maker openswap.
 
 use crate::tests::docker_helpers::{Backend, Swap, run_swap};
 /// Amount swapped by each taker, in sats. The taker is funded with 2×.

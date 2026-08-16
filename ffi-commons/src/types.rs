@@ -1,11 +1,11 @@
-//! Shared types for coinswap UniFFI bindings
+//! Shared types for openswap UniFFI bindings
 //!
 //! This module contains types that are used across multiple modules
 //! to avoid duplicate type definitions across language bindings.
 
 use openswap::{
     bitcoin::{
-        Address as csAddress, Amount as csAmount, OutPoint as coinswapOutPoint,
+        Address as csAddress, Amount as csAmount, OutPoint as openswapOutPoint,
         PublicKey as csPublicKey, ScriptBuf as csScriptBuf, SignedAmount, Txid as csTxid,
         absolute::LockTime as csLocktime,
     },
@@ -154,7 +154,7 @@ pub enum TakerError {
     /// Error related to wallet operations.
     #[error("Wallet error: {msg}")]
     Wallet { msg: String },
-    /// Protocol error during coinswap operations.
+    /// Protocol error during openswap operations.
     #[error("Protocol error: {msg}")]
     Protocol { msg: String },
     /// Error related to network operations.
@@ -189,9 +189,9 @@ impl From<OpenswapTakerError> for TakerError {
 pub enum TakerBehavior {
     /// Normal behaviour
     Normal,
-    /// This depicts the behavior when the taker drops connections after the full coinswap setup.
+    /// This depicts the behavior when the taker drops connections after the full openswap setup.
     DropConnectionAfterFullSetup,
-    /// Behavior to broadcast the contract after the full coinswap setup.
+    /// Behavior to broadcast the contract after the full openswap setup.
     BroadcastContractAfterFullSetup,
 }
 
@@ -228,8 +228,8 @@ pub struct OutPoint {
     pub vout: u32,
 }
 
-impl From<coinswapOutPoint> for OutPoint {
-    fn from(value: coinswapOutPoint) -> Self {
+impl From<openswapOutPoint> for OutPoint {
+    fn from(value: openswapOutPoint) -> Self {
         Self {
             txid: value.txid.into(),
             vout: value.vout,
@@ -462,7 +462,7 @@ impl From<csFidelityBond> for FidelityBond {
     }
 }
 
-/// Represents an offer in the context of the Coinswap protocol.
+/// Represents an offer in the context of the Openswap protocol.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct Offer {
     /// Base fee charged per swap in satoshis (fixed cost component)
@@ -827,7 +827,7 @@ pub fn fetch_mempool_fees() -> Result<FeeRates, TakerError> {
 ///
 /// # Parameters
 ///
-/// - `data_dir`: Target directory, defaults to `~/.coinswap/taker`
+/// - `data_dir`: Target directory, defaults to `~/.openswap/taker`
 /// - `wallet_file_name`: Restored wallet filename, defaults to name from backup if empty
 /// - `backup_file_path`: Path to the JSON file containing the wallet backup (encrypted or plain)
 /// - `password`: Required if backup is encrypted, ignored otherwise
@@ -866,7 +866,7 @@ pub fn create_default_rpc_config() -> RPCConfig {
         url: "http://127.0.0.1:38332".to_string(),
         username: "user".to_string(),
         password: "password".to_string(),
-        wallet_name: "coinswap_wallet".to_string(),
+        wallet_name: "openswap_wallet".to_string(),
     }
 }
 

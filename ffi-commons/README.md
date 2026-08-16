@@ -1,8 +1,8 @@
 <div align="center">
 
-# Coinswap FFI Commons
+# Openswap FFI Commons
 
-Shared Rust and UniFFI core for the Coinswap language bindings
+Shared Rust and UniFFI core for the Openswap language bindings
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Rust 1.75+](https://img.shields.io/badge/rustc-1.75%2B-lightgrey.svg)](https://blog.rust-lang.org/2023/12/28/Rust-1.75.0.html)
@@ -19,21 +19,21 @@ In normal use, you should build from the language package you are shipping. Each
 
 | Binding | Output directory | Runtime targets |
 | --- | --- | --- |
-| [coinswap-kotlin](../coinswap-kotlin) | `../coinswap-kotlin/lib/src/main/` | Android `arm64-v8a`, `armeabi-v7a`, `x86_64`, JVM/Desktop |
-| [coinswap-swift](../coinswap-swift) | `../coinswap-swift/Sources/` and `../coinswap-swift/coinswap_ffi.xcframework` | iOS arm64, iOS simulator arm64/x86_64, macOS arm64/x86_64 |
-| [coinswap-python](../coinswap-python) | `../coinswap-python/src/coinswap/` | Linux x86_64/aarch64, macOS x86_64/arm64, Windows amd64 |
-| [coinswap-ruby](../coinswap-ruby) | `../coinswap-ruby/` | Linux x86_64/aarch64, macOS x86_64/arm64 |
-| [coinswap-react-native](../coinswap-react-native) | `../coinswap-react-native/android/src/main/` and `../coinswap-react-native/ios/` | Android `arm64-v8a`, `x86_64`; iOS arm64, iOS simulator arm64/x86_64 |
+| [openswap-kotlin](../openswap-kotlin) | `../openswap-kotlin/lib/src/main/` | Android `arm64-v8a`, `armeabi-v7a`, `x86_64`, JVM/Desktop |
+| [openswap-swift](../openswap-swift) | `../openswap-swift/Sources/` and `../openswap-swift/openswap_ffi.xcframework` | iOS arm64, iOS simulator arm64/x86_64, macOS arm64/x86_64 |
+| [openswap-python](../openswap-python) | `../openswap-python/src/openswap/` | Linux x86_64/aarch64, macOS x86_64/arm64, Windows amd64 |
+| [openswap-ruby](../openswap-ruby) | `../openswap-ruby/` | Linux x86_64/aarch64, macOS x86_64/arm64 |
+| [openswap-react-native](../openswap-react-native) | `../openswap-react-native/android/src/main/` and `../openswap-react-native/ios/` | Android `arm64-v8a`, `x86_64`; iOS arm64, iOS simulator arm64/x86_64 |
 
 ## Supported Build Model
 
 The supported workflow is package-local:
 
-- Kotlin builds are driven from `coinswap-kotlin/build-scripts/` and then packaged with Gradle.
-- Swift builds are driven from `coinswap-swift/build-xcframework-dev.sh`, `build-xcframework-ci.sh`, or `build-xcframework.sh`.
-- Python builds are driven from `coinswap-python/build-scripts/` and then packaged with `python -m build`.
-- Ruby builds are driven from `coinswap-ruby/build-scripts/`.
-- React Native TurboModule builds are driven from `coinswap-react-native/build-scripts/`.
+- Kotlin builds are driven from `openswap-kotlin/build-scripts/` and then packaged with Gradle.
+- Swift builds are driven from `openswap-swift/build-xcframework-dev.sh`, `build-xcframework-ci.sh`, or `build-xcframework.sh`.
+- Python builds are driven from `openswap-python/build-scripts/` and then packaged with `python -m build`.
+- Ruby builds are driven from `openswap-ruby/build-scripts/`.
+- React Native TurboModule builds are driven from `openswap-react-native/build-scripts/`.
 
 This keeps target selection, output layout, and packaging concerns next to the language consumer instead of centralizing them in a single monolithic script.
 
@@ -52,7 +52,7 @@ Work directly in `ffi-commons` when you are changing the exported Rust API, UniF
 ```bash
 cd ffi-commons
 rustup target add x86_64-unknown-linux-gnu
-cargo build --package coinswap-ffi --profile release-smaller --target x86_64-unknown-linux-gnu
+cargo build --package openswap-ffi --profile release-smaller --target x86_64-unknown-linux-gnu
 ```
 
 ### Example: Generate Bindings Manually
@@ -60,9 +60,9 @@ cargo build --package coinswap-ffi --profile release-smaller --target x86_64-unk
 ```bash
 cd ffi-commons
 cargo run --bin uniffi-bindgen generate \
-   --library ./target/x86_64-unknown-linux-gnu/release-smaller/libcoinswap_ffi.so \
+   --library ./target/x86_64-unknown-linux-gnu/release-smaller/libopenswap_ffi.so \
    --language python \
-   --out-dir ../coinswap-python/src/coinswap/native/linux-x86_64 \
+   --out-dir ../openswap-python/src/openswap/native/linux-x86_64 \
    --no-format
 ```
 
@@ -83,20 +83,20 @@ The package-local scripts wrap these steps and place outputs in the paths expect
 
 ### Python
 
-- Packaged native resources are staged under `src/coinswap/native/<platform>/`.
+- Packaged native resources are staged under `src/openswap/native/<platform>/`.
 - The Python package metadata declares Linux, macOS, and Windows native resources.
 
 ### Ruby
 
-- Generated Ruby bindings live at the package root as `coinswap.rb`.
+- Generated Ruby bindings live at the package root as `openswap.rb`.
 - Native libraries are staged next to the binding for direct FFI loading.
 
 ### React Native (TurboModule)
 
-- JavaScript surface and TurboModule spec live under `coinswap-react-native/src/`.
-- Android native bridge and JNI libraries are staged under `coinswap-react-native/android/src/main/`.
-- iOS native bridge and `coinswap_ffi.xcframework` are staged under `coinswap-react-native/ios/`.
-- Live Legacy and Taproot swap tests are provided in `coinswap-react-native/__tests__/` and use the shared docker regtest stack.
+- JavaScript surface and TurboModule spec live under `openswap-react-native/src/`.
+- Android native bridge and JNI libraries are staged under `openswap-react-native/android/src/main/`.
+- iOS native bridge and `openswap_ffi.xcframework` are staged under `openswap-react-native/ios/`.
+- Live Legacy and Taproot swap tests are provided in `openswap-react-native/__tests__/` and use the shared docker regtest stack.
 
 ## Docker Test Environment
 
@@ -114,10 +114,10 @@ cd ffi-commons
 ## Resources
 
 - [UniFFI Documentation](https://mozilla.github.io/uniffi-rs/)
-- [Coinswap Protocol](https://gist.github.com/chris-belcher/9144bd57a91c194e332fb5ca371d0964)
-- [Coinswap Implementation](https://github.com/citadel-tech/coinswap)
+- [CoinSwap Protocol](https://gist.github.com/chris-belcher/9144bd57a91c194e332fb5ca371d0964)
+- [Openswap Implementation](https://github.com/citadel-foss/openswap)
 
 ## Support
 
-- Issues: [GitHub Issues](https://github.com/citadel-tech/coinswap-ffi/issues)
-- Discussions: [GitHub Discussions](https://github.com/citadel-tech/coinswap/discussions)
+- Issues: [GitHub Issues](https://github.com/citadel-foss/openswap-ffi/issues)
+- Discussions: [GitHub Discussions](https://github.com/citadel-foss/openswap/discussions)

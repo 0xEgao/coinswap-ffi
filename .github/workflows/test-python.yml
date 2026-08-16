@@ -5,14 +5,14 @@ on:
     branches:
       - main
     paths:
-      - 'coinswap-python/**'
+      - 'openswap-python/**'
       - 'ffi-commons/**'
       - '.github/workflows/test-python.yml'
   pull_request:
     branches:
       - main
     paths:
-      - 'coinswap-python/**'
+      - 'openswap-python/**'
       - 'ffi-commons/**'
       - '.github/workflows/test-python.yml'
 
@@ -53,7 +53,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt', 'coinswap-python/pyproject.toml') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt', 'openswap-python/pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
@@ -62,9 +62,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            coinswap-python/src/coinswap/native/linux-x86_64/
-            coinswap-python/src/coinswap/coinswap.py
-          key: ${{ runner.os }}-python-ffi-build-${{ hashFiles('ffi-commons/Cargo.lock', 'ffi-commons/Cargo.toml', 'ffi-commons/src/**', 'ffi-commons/uniffi.toml', 'coinswap-python/build-scripts/development/build-dev-linux-x86_64.sh') }}
+            openswap-python/src/openswap/native/linux-x86_64/
+            openswap-python/src/openswap/openswap.py
+          key: ${{ runner.os }}-python-ffi-build-${{ hashFiles('ffi-commons/Cargo.lock', 'ffi-commons/Cargo.toml', 'ffi-commons/src/**', 'ffi-commons/uniffi.toml', 'openswap-python/build-scripts/development/build-dev-linux-x86_64.sh') }}
 
       - name: Install system dependencies
         run: |
@@ -83,7 +83,7 @@ jobs:
         working-directory: ./ffi-commons
         run: |
           chmod +x ffi-docker-setup
-          if docker pull coinswap/bitcoin-mutinynet:latest && docker pull coinswap/openswap:master; then
+          if docker pull openswap/bitcoin-mutinynet:latest && docker pull openswap/openswap:master; then
             echo "Using prebuilt Docker images"
           else
             echo "Prebuilt image pull failed; falling back to local image build"
@@ -98,19 +98,19 @@ jobs:
           docker ps -a
           
           echo -e "\n=== Bitcoin Core Logs ==="
-          docker logs coinswap-bitcoind --tail 50 || true
+          docker logs openswap-bitcoind --tail 50 || true
           
           echo -e "\n=== Tor Logs ==="
-          docker logs coinswap-tor --tail 30 || true
+          docker logs openswap-tor --tail 30 || true
           
           echo -e "\n=== electrs ==="
-          docker logs coinswap-electrs --tail 30 || true
+          docker logs openswap-electrs --tail 30 || true
 
           echo -e "\n=== Maker1 Logs ==="
-          docker logs coinswap-makerd1 --tail 30 || true
+          docker logs openswap-makerd1 --tail 30 || true
           
           echo -e "\n=== Electrum Maker2 Logs ==="
-          docker logs coinswap-makerd2 --tail 30 || true
+          docker logs openswap-makerd2 --tail 30 || true
 
           echo -e "\n=== Host Port Connectivity ==="
           for i in {1..20}; do
@@ -132,8 +132,8 @@ jobs:
           for i in {1..60}; do
             ok=true
             for m in makerd1 makerd2; do
-              setup=$(docker logs "coinswap-$m" 2>&1 | grep -c "Server setup complete" || true)
-              onion=$(docker logs "coinswap-$m" 2>&1 | grep -c "Generated new Tor Hidden Service Hostname" || true)
+              setup=$(docker logs "openswap-$m" 2>&1 | grep -c "Server setup complete" || true)
+              onion=$(docker logs "openswap-$m" 2>&1 | grep -c "Generated new Tor Hidden Service Hostname" || true)
               if [ "$setup" -ge 1 ] && [ "$onion" -ge 1 ]; then
                 echo "  $m ready (setup=$setup onion=$onion)"
               else
@@ -147,12 +147,12 @@ jobs:
 
       - name: Build FFI bindings
         if: steps.cache-python-ffi-build.outputs.cache-hit != 'true'
-        working-directory: ./coinswap-python
+        working-directory: ./openswap-python
         run: |
           bash ./build-scripts/development/build-dev-linux-x86_64.sh
 
       - name: Run Python test (swap_test.py)
-        working-directory: ./coinswap-python
+        working-directory: ./openswap-python
         run: |
           echo "Running Python swap test (4 takers × 2 makers)..."
           python3 -u test/swap_test.py
@@ -171,5 +171,5 @@ jobs:
           name: python-test-logs
           path: |
             ~/.openswap/taker/debug.log
-            ffi-commons/.coinswap-docker-stack/logs/
+            ffi-commons/.openswap-docker-stack/logs/
           retention-days: 7

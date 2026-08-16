@@ -1,6 +1,6 @@
-name: Publish coinswap-kotlin to Maven Central
+name: Publish openswap-kotlin to Maven Central
 
-# Publishes the coinswap-kotlin library to Maven Central repository.
+# Publishes the openswap-kotlin library to Maven Central repository.
 # Builds the Android library with native components and signs + uploads the artifacts.
 # Manual workflow that requires proper Maven Central credentials and PGP signing keys.
 # Note: The default Android NDK on the ubuntu-24.04 image is 25.2.9519653.
@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: coinswap-kotlin
+        working-directory: openswap-kotlin
     
     steps:
       - name: "Check out PR branch"
@@ -23,7 +23,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: "Build coinswap-kotlin library"
+      - name: "Build openswap-kotlin library"
         run: |           
           bash ./build-scripts/release/build-release-linux-arm64_v8a.sh
           bash ./build-scripts/release/build-release-linux-armeabi-v7a.sh

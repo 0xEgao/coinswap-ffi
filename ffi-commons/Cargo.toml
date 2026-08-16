@@ -1,11 +1,11 @@
 [package]
-name = "coinswap-ffi"
+name = "openswap-ffi"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
 crate-type = ["lib", "cdylib", "staticlib"]
-name = "coinswap_ffi"
+name = "openswap_ffi"
 
 [features]
 default = []

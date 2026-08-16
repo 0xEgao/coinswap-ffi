@@ -1,7 +1,7 @@
 name: Test Swift
 
 # Tests the Swift bindings for cs-ffi on macOS.
-# Triggered by changes to cs-ffi or coinswap-swift directories.
+# Triggered by changes to cs-ffi or openswap-swift directories.
 
 on:
   push:
@@ -9,13 +9,13 @@ on:
       - main
     paths:
       - "ffi-commons/**"
-      - "coinswap-swift/**"
+      - "openswap-swift/**"
   pull_request:
     branches:
       - main
     paths:
       - "ffi-commons/**"
-      - "coinswap-swift/**"
+      - "openswap-swift/**"
 
 permissions: {}
 
@@ -25,7 +25,7 @@ jobs:
     runs-on: macos-15-intel
     defaults:
       run:
-        working-directory: ./coinswap-swift
+        working-directory: ./openswap-swift
 
     steps:
       - name: "Checkout"
@@ -53,7 +53,7 @@ jobs:
           # Do not cache .build: Swift PCH files embed the absolute checkout
           # path and cannot be reused after a repository rename or relocation.
           path: ~/.swiftpm/
-          key: ${{ runner.os }}-swiftpm-v2-${{ hashFiles('coinswap-swift/Package.swift', 'coinswap-swift/Package.resolved') }}
+          key: ${{ runner.os }}-swiftpm-v2-${{ hashFiles('openswap-swift/Package.swift', 'openswap-swift/Package.resolved') }}
           restore-keys: |
             ${{ runner.os }}-swiftpm-v2-
 
@@ -74,7 +74,7 @@ jobs:
         working-directory: ./ffi-commons
         run: |
           chmod +x ffi-docker-setup
-          if docker pull coinswap/bitcoin-mutinynet:latest && docker pull coinswap/openswap:master; then
+          if docker pull openswap/bitcoin-mutinynet:latest && docker pull openswap/openswap:master; then
             echo "Using prebuilt Docker images"
           else
             echo "Prebuilt image pull failed; falling back to local image build"
@@ -89,19 +89,19 @@ jobs:
           docker ps -a
 
           echo -e "\n=== Bitcoin Core Logs ==="
-          docker logs coinswap-bitcoind --tail 50 || true
+          docker logs openswap-bitcoind --tail 50 || true
 
           echo -e "\n=== Tor Logs ==="
-          docker logs coinswap-tor --tail 30 || true
+          docker logs openswap-tor --tail 30 || true
 
           echo -e "\n=== electrs ==="
-          docker logs coinswap-electrs --tail 30 || true
+          docker logs openswap-electrs --tail 30 || true
 
           echo -e "\n=== Maker1 Logs ==="
-          docker logs coinswap-makerd1 --tail 30 || true
+          docker logs openswap-makerd1 --tail 30 || true
 
           echo -e "\n=== Electrum Maker2 Logs ==="
-          docker logs coinswap-makerd2 --tail 30 || true
+          docker logs openswap-makerd2 --tail 30 || true
 
           echo -e "\n=== Host Port Connectivity ==="
           for i in {1..20}; do
@@ -132,8 +132,8 @@ jobs:
           for i in {1..60}; do
             ok=true
             for m in makerd1 makerd2; do
-              setup=$(docker logs "coinswap-$m" 2>&1 | grep -c "Server setup complete" || true)
-              onion=$(docker logs "coinswap-$m" 2>&1 | grep -c "Generated new Tor Hidden Service Hostname" || true)
+              setup=$(docker logs "openswap-$m" 2>&1 | grep -c "Server setup complete" || true)
+              onion=$(docker logs "openswap-$m" 2>&1 | grep -c "Generated new Tor Hidden Service Hostname" || true)
               if [ "$setup" -ge 1 ] && [ "$onion" -ge 1 ]; then
                 echo "  $m ready (setup=$setup onion=$onion)"
               else

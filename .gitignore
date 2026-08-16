@@ -12,28 +12,28 @@ build/
 # Docker generated files
 ffi-commons/docker-compose.generated.yml
 ffi-commons/torrc.generated
-ffi-commons/.coinswap-docker-stack/
+ffi-commons/.openswap-docker-stack/
 ffi-commons/.block-mining.pid
 
 # Kotlin/Swift/Ruby generated files
-coinswap-python/libcoinswap_ffi.so
-coinswap-kotlin/libcoinswap_ffi.so
-coinswap-kotlin/src/main/kotlin/uniffi/
-coinswap-kotlin/src/main/resources/
-coinswap-kotlin/local.properties
-coinswap-swift/libcoinswap_ffi.so
-coinswap-swift/Coinswap.swift
-coinswap-swift/coinswap.swift
-coinswap-swift/CoinswapFFI.modulemap
-coinswap-swift/coinswapFFI.modulemap
-coinswap-ruby/libcoinswap_ffi.so
-coinswap-python/uniffi-bindgen
-coinswap-kotlin/uniffi-bindgen
-coinswap-swift/uniffi-bindgen
-coinswap-ruby/uniffi-bindgen
-coinswap-kotlin/lib/src/main/jniLibs/x86_64/uniffi-bindgen
-coinswap-kotlin/lib/src/main/jniLibs/arm64-v8a/uniffi-bindgen
-coinswap-kotlin/lib/src/main/jniLibs/arm64-v8a/libc++_shared.so
+openswap-python/libopenswap_ffi.so
+openswap-kotlin/libopenswap_ffi.so
+openswap-kotlin/src/main/kotlin/uniffi/
+openswap-kotlin/src/main/resources/
+openswap-kotlin/local.properties
+openswap-swift/libopenswap_ffi.so
+openswap-swift/Openswap.swift
+openswap-swift/openswap.swift
+openswap-swift/OpenswapFFI.modulemap
+openswap-swift/openswapFFI.modulemap
+openswap-ruby/libopenswap_ffi.so
+openswap-python/uniffi-bindgen
+openswap-kotlin/uniffi-bindgen
+openswap-swift/uniffi-bindgen
+openswap-ruby/uniffi-bindgen
+openswap-kotlin/lib/src/main/jniLibs/x86_64/uniffi-bindgen
+openswap-kotlin/lib/src/main/jniLibs/arm64-v8a/uniffi-bindgen
+openswap-kotlin/lib/src/main/jniLibs/arm64-v8a/libc++_shared.so
 
 # Gradle
 .gradle/

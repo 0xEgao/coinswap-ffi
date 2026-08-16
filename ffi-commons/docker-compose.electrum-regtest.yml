@@ -1,7 +1,7 @@
 services:
   bitcoind:
-    image: coinswap/bitcoin-mutinynet:latest
-    container_name: coinswap-bitcoind
+    image: openswap/bitcoin-mutinynet:latest
+    container_name: openswap-bitcoind
     user: "0:0"
     command:
       - bitcoind
@@ -42,7 +42,7 @@ services:
     # It uses JSON-RPC block import (`--jsonrpc-import`) rather than a P2P
     # connection, so no --daemon-p2p-addr is needed.
     image: mempool/electrs:v3.4.0-dev1
-    container_name: coinswap-electrs
+    container_name: openswap-electrs
     entrypoint: ["electrs"]
     command:
       - --network=regtest
@@ -72,7 +72,7 @@ services:
 
   tor:
     image: osminogin/tor-simple
-    container_name: coinswap-tor
+    container_name: openswap-tor
     volumes:
       - ./torrc.generated:/etc/tor/torrc:ro
     ports:
@@ -82,8 +82,8 @@ services:
 
   # ---- RPC maker (Bitcoin Core backend) ----
   makerd1:
-    image: coinswap/openswap:master
-    container_name: coinswap-makerd1
+    image: openswap/openswap:master
+    container_name: openswap-makerd1
     network_mode: "service:tor"
     depends_on:
       bitcoind:
@@ -91,7 +91,7 @@ services:
     command: >
       sh -c 'sleep 1 &&
       mkdir -p /home/openswap/.openswap/maker &&
-      printf "%s\n" "network_port = 16102" "rpc_port = 6102" "socks_port = 9050" "control_port = 9051" "tor_auth_password = coinswap" "min_swap_amount = 10000" "fidelity_amount = 50000" "fidelity_timelock = 13104" > /home/openswap/.openswap/maker/config.toml &&
+      printf "%s\n" "network_port = 16102" "rpc_port = 6102" "socks_port = 9050" "control_port = 9051" "tor_auth_password = openswap" "min_swap_amount = 10000" "fidelity_amount = 50000" "fidelity_timelock = 13104" > /home/openswap/.openswap/maker/config.toml &&
       makerd -r bitcoind:18442 -z tcp://bitcoind:28332 -a user:password -w makerd1-wallet'
     environment:
       - RUST_LOG=info
@@ -102,8 +102,8 @@ services:
   # docker network (clearnet hostname), so --electrum-tor is NOT needed here;
   # peer-to-peer maker traffic still goes over Tor via network_mode.
   makerd2:
-    image: coinswap/openswap:master
-    container_name: coinswap-makerd2
+    image: openswap/openswap:master
+    container_name: openswap-makerd2
     network_mode: "service:tor"
     depends_on:
       electrs:
@@ -111,7 +111,7 @@ services:
     command: >
       sh -c 'sleep 2 &&
       mkdir -p /home/openswap/.openswap/maker &&
-      printf "%s\n" "network_port = 16103" "rpc_port = 6103" "socks_port = 9050" "control_port = 9051" "tor_auth_password = coinswap" "min_swap_amount = 10000" "fidelity_amount = 50000" "fidelity_timelock = 13104" > /home/openswap/.openswap/maker/config.toml &&
+      printf "%s\n" "network_port = 16103" "rpc_port = 6103" "socks_port = 9050" "control_port = 9051" "tor_auth_password = openswap" "min_swap_amount = 10000" "fidelity_amount = 50000" "fidelity_timelock = 13104" > /home/openswap/.openswap/maker/config.toml &&
       makerd --electrum tcp://electrs:50001 -w makerd2-wallet'
     environment:
       - RUST_LOG=info
@@ -122,4 +122,4 @@ volumes:
 
 networks:
   default:
-    name: coinswap-network
+    name: openswap-network

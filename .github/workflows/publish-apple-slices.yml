@@ -11,7 +11,7 @@ jobs:
     runs-on: macos-14
     defaults:
       run:
-        working-directory: coinswap-swift
+        working-directory: openswap-swift
 
     steps:
       - name: Checkout
@@ -28,31 +28,31 @@ jobs:
       - name: Upload macOS slice
         uses: actions/upload-artifact@v4
         with:
-          name: coinswap_ffi-macos
-          path: coinswap-swift/coinswap_ffi.xcframework/macos-arm64_x86_64
+          name: openswap_ffi-macos
+          path: openswap-swift/openswap_ffi.xcframework/macos-arm64_x86_64
           if-no-files-found: warn
           retention-days: 14
 
       - name: Upload iOS device slice
         uses: actions/upload-artifact@v4
         with:
-          name: coinswap_ffi-ios-device
-          path: coinswap-swift/coinswap_ffi.xcframework/ios-arm64
+          name: openswap_ffi-ios-device
+          path: openswap-swift/openswap_ffi.xcframework/ios-arm64
           if-no-files-found: warn
           retention-days: 14
 
       - name: Upload iOS simulator slice
         uses: actions/upload-artifact@v4
         with:
-          name: coinswap_ffi-ios-simulator
-          path: coinswap-swift/coinswap_ffi.xcframework/ios-arm64_x86_64-simulator
+          name: openswap_ffi-ios-simulator
+          path: openswap-swift/openswap_ffi.xcframework/ios-arm64_x86_64-simulator
           if-no-files-found: warn
           retention-days: 14
 
       - name: Upload full xcframework
         uses: actions/upload-artifact@v4
         with:
-          name: coinswap_ffi-xcframework
-          path: coinswap-swift/coinswap_ffi.xcframework
+          name: openswap_ffi-xcframework
+          path: openswap-swift/openswap_ffi.xcframework
           if-no-files-found: warn
           retention-days: 14

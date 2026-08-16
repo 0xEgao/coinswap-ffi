@@ -1,0 +1,289 @@
+using System.Diagnostics;
+using Openswap.Native;
+using Xunit;
+using Xunit.Abstractions;
+
+namespace Openswap.Tests;
+
+/// <summary>
+/// Live integration test: 4 takers × 2 makers.
+///
+/// One test per (backend × protocol) combination — legacy/taproot over
+/// rpc/electrum — each running a 2-maker openswap against the Docker regtest
+/// stack (1 RPC maker + 1 Electrum maker). Mirrors the Rust <c>swap_test</c> and
+/// the Kotlin <c>SwapTest</c>. Requires the stack running:
+/// <c>cd ../ffi-commons &amp;&amp; ./ffi-docker-setup start</c>.
+/// </summary>
+public class SwapTest
+{
+    private const string BitcoindContainer = "openswap-bitcoind";
+    private const string RpcUrl = "localhost:18442";
+    private const string RpcUser = "user";
+    private const string RpcPassword = "password";
+    private const string ZmqAddr = "tcp://localhost:28332";
+    private const string ElectrumUrl = "tcp://localhost:50001";
+    private const ushort ControlPort = 9051;
+    private static readonly string[] MakerContainers = ["openswap-makerd1", "openswap-makerd2"];
+
+    /// <summary>Amount swapped by each taker, in sats. The taker is funded with 2×.</summary>
+    private const ulong SwapAmount = 500_000;
+    private const uint MakerCount = 2;
+    private const int MakerReadyAttempts = 3;
+    private const int MakerReadyRetryMs = 10_000;
+    private static readonly List<Taker> LiveTestTakers = [];
+
+    private enum Backend { Rpc, Electrum }
+
+    private readonly ITestOutputHelper _out;
+
+    public SwapTest(ITestOutputHelper output) => _out = output;
+
+    [Fact]
+    public void LegacyRpc() =>
+        RunSwap("legacy_rpc", Backend.Rpc, "Legacy", "P2WPKH");
+
+    [Fact]
+    public void TaprootRpc() =>
+        RunSwap("taproot_rpc", Backend.Rpc, "Taproot", "P2TR");
+
+    [Fact]
+    public void LegacyElectrum() =>
+        RunSwap("legacy_electrum", Backend.Electrum, "Legacy", "P2WPKH");
+
+    [Fact]
+    public void TaprootElectrum() =>
+        RunSwap("taproot_electrum", Backend.Electrum, "Taproot", "P2TR");
+
+    /// <summary>Run one taker end-to-end: init → fund → sync → 2-maker openswap → assert.</summary>
+    private void RunSwap(string name, Backend backend, string protocol, string addrType)
+    {
+        _out.WriteLine($"\n=== {name} ({protocol}) ===");
+
+        var dataDir = Path.Combine(Path.GetTempPath(), $"openswap-csharp-{name}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dataDir);
+        var rpcWalletName = $"csharp_{name}";
+
+        var rpcConfig = backend == Backend.Rpc
+            ? new RpcConfig(
+                Url: RpcUrl,
+                Username: RpcUser,
+                Password: RpcPassword,
+                WalletName: rpcWalletName)
+            : null;
+
+        var backendConfig = backend == Backend.Electrum
+            ? new BackendConfig(
+                Kind: "electrum",
+                Url: ElectrumUrl,
+                Username: null,
+                Password: null,
+                WalletName: null,
+                ZmqAddr: null,
+                Socks5: null,
+                Timeout: null,
+                PollIntervalSecs: null,
+                MaxRetries: null)
+            : null;
+
+        if (backend == Backend.Rpc)
+            CleanupBitcoindWallet(rpcWalletName);
+
+        var makerAddresses = LocalMakerAddresses();
+
+        // Positional args mirror the Rust `Taker::init` signature order:
+        // (data_dir, wallet_file_name, rpc_config, control_port, tor_auth_password,
+        //  zmq_addr, password, nostr_relays, backend_config).
+        var taker = Taker.Init(
+            dataDir,
+            name,
+            rpcConfig,
+            ControlPort,
+            "openswap",
+            ZmqAddr,
+            "",
+            // Each CI job owns an isolated regtest chain. Avoid public discovery,
+            // which may return makers announced by unrelated concurrent jobs.
+            Array.Empty<string>(),
+            backendConfig);
+        lock (LiveTestTakers)
+            LiveTestTakers.Add(taker);
+
+        WaitForSuitableMakers(taker, name, protocol, makerAddresses);
+
+        // Fund with 2× the swap amount across 4 fresh external addresses.
+        const string quarterBtc = "0.0025"; // 250,000 sats; 4× = 1,000,000 = 2 × SwapAmount
+        for (var i = 0; i < 4; i++)
+        {
+            var addr = taker.GetNextExternalAddress(new AddressType(addrType)).Addr;
+            Fund(addr, quarterBtc);
+        }
+
+        var funded = WaitForSpendable(taker, SwapAmount * 2);
+        Assert.True(
+            (ulong)funded.Spendable >= SwapAmount * 2,
+            $"{name}: spendable ({funded.Spendable}) should reach funded amount ({SwapAmount * 2})");
+
+        var swapId = taker.PrepareOpenswap(new SwapParams(
+            Protocol: protocol,
+            SendAmount: SwapAmount,
+            MakerCount: MakerCount,
+            TxCount: 1,
+            RequiredConfirms: 1,
+            ManuallySelectedOutpoints: null,
+            PreferredMakers: makerAddresses.ToArray(),
+            PaymentAddress: null));
+
+        var report = taker.StartOpenswap(swapId);
+        Assert.NotNull(report);
+        Assert.True(report.MakersCount.HasValue, $"{name}: swap report should include maker count");
+        Assert.Equal(MakerCount, report.MakersCount.Value);
+        Assert.Contains("SUCCESS", report.Status.ToUpperInvariant());
+
+        _out.WriteLine($"✓ {name} passed (swap_id {report.SwapId})");
+    }
+
+    /// <summary>Wait for two usable offers and explicitly re-poll transient failures.</summary>
+    private void WaitForSuitableMakers(
+        Taker taker, string name, string protocol, IReadOnlyList<string> makerAddresses)
+    {
+        var lastSuitableCount = 0;
+
+        for (var attempt = 1; attempt <= MakerReadyAttempts; attempt++)
+        {
+            foreach (var address in makerAddresses)
+            {
+                try
+                {
+                    _out.WriteLine($"  polling local maker {address}");
+                    taker.PollMaker(address);
+                }
+                catch (Exception error)
+                {
+                    _out.WriteLine($"  poll failed for {address}: {error.Message}");
+                }
+            }
+
+            var offerbook = taker.FetchOffers();
+            lastSuitableCount = PrintOfferbook(name, protocol, offerbook, attempt);
+            if (lastSuitableCount >= MakerCount) return;
+
+            if (attempt < MakerReadyAttempts)
+                Thread.Sleep(MakerReadyRetryMs);
+        }
+
+        throw new InvalidOperationException(
+            $"{name}: expected {MakerCount} suitable {protocol} makers for " +
+            $"{SwapAmount} sats, found {lastSuitableCount}");
+    }
+
+    /// <summary>Print maker states and return the number suitable for this swap.</summary>
+    private int PrintOfferbook(string name, string protocol, OfferBook offerbook, int attempt)
+    {
+        var suitable = offerbook.Makers.Where(maker =>
+            maker.State.StateType == "Good"
+            && maker.Protocol is not null
+            && (maker.Protocol.ProtocolType == protocol || maker.Protocol.ProtocolType == "Unified")
+            && maker.Offer is not null
+            && maker.Offer.MinSize <= (long)SwapAmount
+            && (long)SwapAmount <= maker.Offer.MaxSize
+        ).ToList();
+
+        _out.WriteLine(
+            $"{name}: offerbook attempt {attempt}/{MakerReadyAttempts}: " +
+            $"{offerbook.Makers.Length} total, {suitable.Count} suitable {protocol} makers");
+
+        foreach (var maker in offerbook.Makers)
+        {
+            var makerProtocol = maker.Protocol?.ProtocolType ?? "None";
+            var amountRange = maker.Offer is null
+                ? "no offer"
+                : $"{maker.Offer.MinSize}..{maker.Offer.MaxSize} sats";
+            _out.WriteLine(
+                $"  {maker.Address.Address}: state={maker.State.StateType}, " +
+                $"protocol={makerProtocol}, amount={amountRange}");
+        }
+
+        return suitable.Count;
+    }
+
+    /// <summary>Read the two onion addresses belonging to this job's Docker stack.</summary>
+    private static IReadOnlyList<string> LocalMakerAddresses()
+    {
+        const string marker = "Generated new Tor Hidden Service Hostname:";
+        var addresses = new List<string>();
+
+        foreach (var container in MakerContainers)
+        {
+            var (code, stdout, stderr) = RunDocker("logs", container);
+            if (code != 0)
+                throw new InvalidOperationException($"{container}: failed to read maker logs: {stderr}");
+
+            string? address = null;
+            foreach (var line in (stdout + "\n" + stderr).Split('\n'))
+            {
+                var markerIndex = line.IndexOf(marker, StringComparison.Ordinal);
+                if (markerIndex < 0) continue;
+                address = line[(markerIndex + marker.Length)..]
+                    .Trim()
+                    .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)[0];
+            }
+
+            if (address is null)
+                throw new InvalidOperationException($"{container}: maker onion address not found in logs");
+            addresses.Add(address);
+        }
+
+        return addresses;
+    }
+
+    /// <summary>Removes a stale Docker-hosted taker wallet from prior test runs.</summary>
+    private void CleanupBitcoindWallet(string walletName)
+    {
+        RunDocker(
+            "exec", BitcoindContainer, "bitcoin-cli", "-regtest", "-rpcport=18442",
+            $"-rpcuser={RpcUser}", $"-rpcpassword={RpcPassword}",
+            "unloadwallet", walletName);
+        RunDocker("exec", BitcoindContainer, "rm", "-rf", $"/home/bitcoin/.bitcoin/wallets/{walletName}");
+    }
+
+    /// <summary>Sync until spendable reaches <paramref name="target"/>, tolerating Electrum indexing lag.</summary>
+    private Balances WaitForSpendable(Taker taker, ulong target)
+    {
+        for (var i = 0; i < 30; i++)
+        {
+            taker.SyncAndSave();
+            var b = taker.GetBalances();
+            if ((ulong)b.Spendable >= target) return b;
+            Thread.Sleep(3000);
+        }
+        return taker.GetBalances();
+    }
+
+    /// <summary>Sends BTC to the taker address from the docker-hosted "test" wallet.</summary>
+    private void Fund(string address, string amountBtc)
+    {
+        var (code, _, stderr) = RunDocker(
+            "exec", BitcoindContainer, "bitcoin-cli", "-regtest", "-rpcport=18442",
+            "-rpcwallet=test", $"-rpcuser={RpcUser}", $"-rpcpassword={RpcPassword}",
+            "sendtoaddress", address, amountBtc);
+        if (code != 0)
+            throw new InvalidOperationException($"funding failed: {stderr}");
+    }
+
+    private static (int code, string stdout, string stderr) RunDocker(params string[] args)
+    {
+        var psi = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+
+        using var p = Process.Start(psi)!;
+        var stdout = p.StandardOutput.ReadToEnd();
+        var stderr = p.StandardError.ReadToEnd();
+        p.WaitForExit();
+        return (p.ExitCode, stdout, stderr);
+    }
+}

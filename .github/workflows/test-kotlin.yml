@@ -5,14 +5,14 @@ on:
     branches:
       - main
     paths:
-      - 'coinswap-kotlin/**'
+      - 'openswap-kotlin/**'
       - 'ffi-commons/**'
       - '.github/workflows/test-kotlin.yml'
   pull_request:
     branches:
       - main
     paths:
-      - 'coinswap-kotlin/**'
+      - 'openswap-kotlin/**'
       - 'ffi-commons/**'
       - '.github/workflows/test-kotlin.yml'
 
@@ -54,7 +54,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-            coinswap-kotlin/.gradle
+            openswap-kotlin/.gradle
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
@@ -64,13 +64,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            coinswap-kotlin/lib/src/main/jniLibs/x86_64/
-            coinswap-kotlin/lib/src/main/kotlin/
-          key: ${{ runner.os }}-kotlin-ffi-build-${{ hashFiles('ffi-commons/Cargo.lock', 'ffi-commons/Cargo.toml', 'ffi-commons/src/**', 'ffi-commons/uniffi.toml', 'coinswap-kotlin/build-scripts/development/build-dev-linux-jvm.sh', 'coinswap-kotlin/lib/build.gradle.kts') }}
+            openswap-kotlin/lib/src/main/jniLibs/x86_64/
+            openswap-kotlin/lib/src/main/kotlin/
+          key: ${{ runner.os }}-kotlin-ffi-build-${{ hashFiles('ffi-commons/Cargo.lock', 'ffi-commons/Cargo.toml', 'ffi-commons/src/**', 'ffi-commons/uniffi.toml', 'openswap-kotlin/build-scripts/development/build-dev-linux-jvm.sh', 'openswap-kotlin/lib/build.gradle.kts') }}
 
       - name: "Build Android library"
         if: steps.cache-kotlin-ffi-build.outputs.cache-hit != 'true'
-        working-directory: ./coinswap-kotlin
+        working-directory: ./openswap-kotlin
         run: |
           chmod +x build-scripts/development/build-dev-linux-jvm.sh
           bash ./build-scripts/development/build-dev-linux-jvm.sh
@@ -85,7 +85,7 @@ jobs:
         working-directory: ./ffi-commons
         run: |
           chmod +x ffi-docker-setup
-          if docker pull coinswap/bitcoin-mutinynet:latest && docker pull coinswap/openswap:master; then
+          if docker pull openswap/bitcoin-mutinynet:latest && docker pull openswap/openswap:master; then
             echo "Using prebuilt Docker images"
           else
             echo "Prebuilt image pull failed; falling back to local image build"
@@ -120,8 +120,8 @@ jobs:
           for i in {1..60}; do
             ok=true
             for m in makerd1 makerd2; do
-              setup=$(docker logs "coinswap-$m" 2>&1 | grep -c "Server setup complete" || true)
-              announced=$(docker logs "coinswap-$m" 2>&1 | grep -c "Nostr relay accepted" || true)
+              setup=$(docker logs "openswap-$m" 2>&1 | grep -c "Server setup complete" || true)
+              announced=$(docker logs "openswap-$m" 2>&1 | grep -c "Nostr relay accepted" || true)
               if [ "$setup" -ge 1 ] && [ "$announced" -ge 1 ]; then
                 echo "  $m ready (setup=$setup announced=$announced)"
               else
@@ -133,10 +133,10 @@ jobs:
           done
 
       - name: Run Kotlin swap test (legacy/taproot x rpc/electrum, 2 makers)
-        working-directory: ./coinswap-kotlin
+        working-directory: ./openswap-kotlin
         run: |
           chmod +x gradlew
-          ./gradlew :lib:testDebugUnitTest --tests "org.coinswap.SwapTest" --no-daemon --stacktrace
+          ./gradlew :lib:testDebugUnitTest --tests "org.openswap.SwapTest" --no-daemon --stacktrace
 
       - name: Cleanup Docker
         if: always()
@@ -150,6 +150,6 @@ jobs:
         with:
           name: kotlin-test-results
           path: |
-            coinswap-kotlin/build/reports/tests/
-            coinswap-kotlin/build/test-results/
+            openswap-kotlin/build/reports/tests/
+            openswap-kotlin/build/test-results/
           retention-days: 7

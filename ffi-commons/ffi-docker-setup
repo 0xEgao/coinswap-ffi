@@ -3,9 +3,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COINSWAP_REPO="https://github.com/citadel-foss/openswap.git"
-COINSWAP_BRANCH="master"
-COINSWAP_DIR="$SCRIPT_DIR/.coinswap-docker-stack"
+OPENSWAP_REPO="https://github.com/citadel-foss/openswap.git"
+OPENSWAP_BRANCH="master"
+OPENSWAP_DIR="$SCRIPT_DIR/.openswap-docker-stack"
 IMAGE_NAME="openswap"
 BITCOIN_IMAGE_NAME="bitcoin-mutinynet"
 VERSION_FILE="latest"
@@ -64,15 +64,15 @@ check_docker() {
     fi
 }
 
-setup_coinswap_repo() {
-    if [ ! -d "$COINSWAP_DIR" ]; then
+setup_openswap_repo() {
+    if [ ! -d "$OPENSWAP_DIR" ]; then
         print_info "Cloning Openswap repository for Docker images..."
-        git clone --depth 1 --branch "$COINSWAP_BRANCH" "$COINSWAP_REPO" "$COINSWAP_DIR"
+        git clone --depth 1 --branch "$OPENSWAP_BRANCH" "$OPENSWAP_REPO" "$OPENSWAP_DIR"
     else
-        print_info "Updating Openswap repository at $COINSWAP_DIR..."
-        git -C "$COINSWAP_DIR" remote set-url origin "$COINSWAP_REPO"
-        git -C "$COINSWAP_DIR" fetch --depth 1 origin "$COINSWAP_BRANCH"
-        git -C "$COINSWAP_DIR" checkout --detach FETCH_HEAD
+        print_info "Updating Openswap repository at $OPENSWAP_DIR..."
+        git -C "$OPENSWAP_DIR" remote set-url origin "$OPENSWAP_REPO"
+        git -C "$OPENSWAP_DIR" fetch --depth 1 origin "$OPENSWAP_BRANCH"
+        git -C "$OPENSWAP_DIR" checkout --detach FETCH_HEAD
     fi
 }
 
@@ -89,9 +89,9 @@ EOF
 }
 
 build_image() {
-    print_info "Building Openswap Docker image (branch: ${COINSWAP_BRANCH})..."
-    cd "$COINSWAP_DIR"
-    if docker build -f docker/Dockerfile -t "coinswap/${IMAGE_NAME}:${COINSWAP_BRANCH}" -t "coinswap/${IMAGE_NAME}:latest" .; then
+    print_info "Building Openswap Docker image (branch: ${OPENSWAP_BRANCH})..."
+    cd "$OPENSWAP_DIR"
+    if docker build -f docker/Dockerfile -t "openswap/${IMAGE_NAME}:${OPENSWAP_BRANCH}" -t "openswap/${IMAGE_NAME}:latest" .; then
         print_success "Openswap image built successfully"
     else
         print_error "Failed to build Openswap image"
@@ -101,7 +101,7 @@ build_image() {
 
 build_bitcoin_image() {
     print_info "Building Bitcoin Mutinynet Docker image..."
-    cd "$COINSWAP_DIR"
+    cd "$OPENSWAP_DIR"
     if [ -f "docker/bitcoin-mutinynet.version" ]; then
         local tag=$(grep "^TAG=" "docker/bitcoin-mutinynet.version" | cut -d'=' -f2)
         local f_amd64=$(grep "^FILENAME_AMD64=" "docker/bitcoin-mutinynet.version" | cut -d'=' -f2)
@@ -135,8 +135,8 @@ build_bitcoin_image() {
             --build-arg FILENAME_ARM64="$f_arm64" \
             --build-arg SHA256_ARM64="$s_arm64" \
             -f docker/Dockerfile.bitcoin-mutinynet \
-            -t "coinswap/${BITCOIN_IMAGE_NAME}:${tag}" \
-            -t "coinswap/${BITCOIN_IMAGE_NAME}:latest" .; then
+            -t "openswap/${BITCOIN_IMAGE_NAME}:${tag}" \
+            -t "openswap/${BITCOIN_IMAGE_NAME}:latest" .; then
             print_success "Bitcoin Mutinynet image built successfully"
         else
             print_error "Failed to build Bitcoin Mutinynet image"
@@ -151,10 +151,10 @@ build_bitcoin_image() {
 start_stack() {
     check_docker
     generate_torrc
-    print_info "Starting Coinswap regtest stack (1 RPC + 1 Electrum maker)..."
+    print_info "Starting Openswap regtest stack (1 RPC + 1 Electrum maker)..."
     cd "$SCRIPT_DIR"
     if docker compose -f "$COMPOSE_FILE" up -d; then
-        print_success "Coinswap stack started successfully"
+        print_success "Openswap stack started successfully"
         docker compose -f "$COMPOSE_FILE" ps
 
         print_info "Waiting 10 seconds for services to initialize..."
@@ -164,29 +164,29 @@ start_stack() {
 
         start_block_mining
     else
-        print_error "Failed to start Coinswap stack"
+        print_error "Failed to start Openswap stack"
         exit 1
     fi
 }
 
 stop_stack() {
-    print_info "Stopping Coinswap stack..."
+    print_info "Stopping Openswap stack..."
     cd "$SCRIPT_DIR"
 
     stop_block_mining
 
     if [ -f "$COMPOSE_FILE" ]; then
         print_info "Cleaning wallet directories in containers..."
-        docker exec coinswap-bitcoind sh -c "rm -rf /home/*" 2>/dev/null || true
+        docker exec openswap-bitcoind sh -c "rm -rf /home/*" 2>/dev/null || true
 
         local container
         for container in "${ALL_MAKERS[@]}"; do
-            docker exec "coinswap-${container}" sh -c "rm -rf /home/openswap/.openswap/*" 2>/dev/null || true
+            docker exec "openswap-${container}" sh -c "rm -rf /home/openswap/.openswap/*" 2>/dev/null || true
         done
 
         docker compose -f "$COMPOSE_FILE" down -v
     fi
-    print_success "Coinswap stack stopped and cleaned up"
+    print_success "Openswap stack stopped and cleaned up"
 }
 
 show_logs() {
@@ -202,11 +202,11 @@ fund_makers() {
     print_info "Funding makers with Bitcoin (regtest)..."
 
     print_info "Creating Bitcoin wallet..."
-    docker exec coinswap-bitcoind bitcoin-cli -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password createwallet "test" 2>/dev/null || true
+    docker exec openswap-bitcoind bitcoin-cli -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password createwallet "test" 2>/dev/null || true
 
     print_info "Mining initial blocks for coinbase maturity..."
-    local addr=$(docker exec coinswap-bitcoind bitcoin-cli -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password -rpcwallet=test getnewaddress)
-    docker exec coinswap-bitcoind bitcoin-cli -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password generatetoaddress 101 "$addr"
+    local addr=$(docker exec openswap-bitcoind bitcoin-cli -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password -rpcwallet=test getnewaddress)
+    docker exec openswap-bitcoind bitcoin-cli -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password generatetoaddress 101 "$addr"
 
     print_info "Waiting for makers to start..."
     sleep 15
@@ -217,14 +217,14 @@ fund_makers() {
     local maker_name
     for maker_name in "${ALL_MAKERS[@]}"; do
         current_round=$((current_round + 1))
-        local container_name="coinswap-${maker_name}"
+        local container_name="openswap-${maker_name}"
         print_info "Funding ${maker_name}..."
         local maker_addr
         maker_addr=$(docker logs "$container_name" 2>&1 | grep "Send at least" | tail -1 | grep -Eo 'bcrt1[[:alnum:]]+')
         if [ -n "$maker_addr" ]; then
             print_info "${maker_name} address: $maker_addr"
             for _ in 1 2 3 4; do
-                docker exec coinswap-bitcoind bitcoin-cli -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password -rpcwallet=test sendtoaddress "$maker_addr" 0.25
+                docker exec openswap-bitcoind bitcoin-cli -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password -rpcwallet=test sendtoaddress "$maker_addr" 0.25
             done
             print_success "Sent 4x 0.25 BTC (1 BTC total) to ${maker_name}"
         else
@@ -245,11 +245,11 @@ fund_makers() {
 }
 
 mine_blocks() {
-    local addr=$(docker exec coinswap-bitcoind bitcoin-cli \
+    local addr=$(docker exec openswap-bitcoind bitcoin-cli \
         -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password \
         -rpcwallet=test getnewaddress 2>/dev/null)
 
-    docker exec coinswap-bitcoind bitcoin-cli \
+    docker exec openswap-bitcoind bitcoin-cli \
         -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password \
         generatetoaddress 1 "$addr" > /dev/null 2>&1
 }
@@ -266,14 +266,14 @@ start_block_mining() {
     fi
 
     # Mine one block every 20s. Fast enough to confirm fidelity bonds and
-    # funding promptly, but slow enough that a multi-hop coinswap over Tor
+    # funding promptly, but slow enough that a multi-hop openswap over Tor
     # completes well within its refund timelock window (~31 blocks of headroom).
     # A 5s cadence raced past the swap timelock and broke Taproot swaps.
     print_info "Starting automatic block mining (every 20 seconds)..."
 
     nohup bash -c '
         while true; do
-            if ! docker ps --format "{{.Names}}" | grep -q "^coinswap-bitcoind$"; then
+            if ! docker ps --format "{{.Names}}" | grep -q "^openswap-bitcoind$"; then
                 break
             fi
             "'"$SCRIPT_DIR"'/ffi-docker-setup" mine
@@ -304,17 +304,17 @@ stop_block_mining() {
 }
 
 show_help() {
-    echo "Coinswap Docker Setup Script (regtest, fixed 1 RPC + 1 Electrum maker)"
+    echo "Openswap Docker Setup Script (regtest, fixed 1 RPC + 1 Electrum maker)"
     echo ""
     echo "Usage: $0 [COMMAND] [ARGS]"
     echo ""
     echo "Commands:"
     echo "  setup               Setup environment (clone repo, build images)"
-    echo "  build               Build the Coinswap Docker image"
+    echo "  build               Build the Openswap Docker image"
     echo "  build-bitcoin       Build the Bitcoin Mutinynet Docker image"
     echo "  start               Start the full stack (bitcoind + electrs + tor + 2 makers)"
-    echo "  stop                Stop the Coinswap stack and block mining"
-    echo "  restart             Restart the Coinswap stack"
+    echo "  stop                Stop the Openswap stack and block mining"
+    echo "  restart             Restart the Openswap stack"
     echo "  fund-makers         Manually fund maker wallets (done automatically on start)"
     echo "  mine                Manually mine a block (auto-mining runs every 20s)"
     echo "  start-mining        Start automatic block mining"
@@ -351,7 +351,7 @@ done
 case "$COMMAND" in
     "setup")
         check_docker
-        setup_coinswap_repo
+        setup_openswap_repo
         build_bitcoin_image
         build_image
         print_success "Setup complete! Run '$0 start' to start services"

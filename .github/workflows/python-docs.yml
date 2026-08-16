@@ -2,7 +2,7 @@ name: Publish Python Docs
 
 on:
   workflow_run:
-    workflows: ["Publish coinswap to PyPI"]
+    workflows: ["Publish openswap to PyPI"]
     types: [completed]
   workflow_dispatch:
 
@@ -34,7 +34,7 @@ jobs:
           python-version: "3.12"
 
       - name: Build bindings (Linux)
-        working-directory: ./coinswap-python
+        working-directory: ./openswap-python
         run: |
           bash ./build-scripts/development/build-dev-linux-x86_64.sh
 
@@ -42,14 +42,14 @@ jobs:
         run: pip install sphinx furo
 
       - name: Build docs
-        working-directory: ./coinswap-python/docs
+        working-directory: ./openswap-python/docs
         run: |
           sphinx-build -b html . _build/html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: coinswap-python/docs/_build/html
+          path: openswap-python/docs/_build/html
 
       - name: Deploy to GitHub Pages
         id: deployment

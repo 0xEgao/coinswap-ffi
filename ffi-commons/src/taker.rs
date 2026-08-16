@@ -1,6 +1,6 @@
-//! Coinswap Taker UniFFI bindings
+//! Openswap Taker UniFFI bindings
 //!
-//! This module provides UniFFI bindings for the coinswap taker functionality.
+//! This module provides UniFFI bindings for the openswap taker functionality.
 
 use crate::{
     AddressType,
@@ -13,8 +13,8 @@ use crate::{
 };
 use openswap::{
     bitcoin::{
-        Address as OpenswapAddress, Amount as coinswapAmount, OutPoint as coinswapOutPoint,
-        Txid as coinswapTxid, address::NetworkUnchecked,
+        Address as OpenswapAddress, Amount as openswapAmount, OutPoint as openswapOutPoint,
+        Txid as openswapTxid, address::NetworkUnchecked,
     },
     protocol::ProtocolVersion,
     taker::api::{
@@ -33,7 +33,7 @@ use std::{
 /// Swap specific parameters. These are user's policy and can differ among swaps.
 /// SwapParams govern the criteria to find suitable set of makers from the offerbook.
 ///
-/// If no maker matches with a given SwapParam, that coinswap round will fail.
+/// If no maker matches with a given SwapParam, that openswap round will fail.
 #[derive(uniffi::Record)]
 pub struct SwapParams {
     /// Protocol to use: Legacy or Taproot.
@@ -77,20 +77,20 @@ impl TryFrom<SwapParams> for OpenswapSwapParams {
             }
         };
 
-        let send_amount = coinswapAmount::from_sat(params.send_amount);
+        let send_amount = openswapAmount::from_sat(params.send_amount);
 
         let manually_selected_outpoints = params
             .manually_selected_outpoints
-            .map(|outpoints| -> Result<Vec<coinswapOutPoint>, TakerError> {
+            .map(|outpoints| -> Result<Vec<openswapOutPoint>, TakerError> {
                 outpoints
                     .into_iter()
                     .map(|op| {
-                        let txid = op.txid.value.parse::<coinswapTxid>().map_err(|e| {
+                        let txid = op.txid.value.parse::<openswapTxid>().map_err(|e| {
                             TakerError::General {
                                 msg: format!("Invalid txid: {}", e),
                             }
                         })?;
-                        Ok(coinswapOutPoint::new(txid, op.vout))
+                        Ok(openswapOutPoint::new(txid, op.vout))
                     })
                     .collect()
             })
@@ -120,12 +120,12 @@ impl TryFrom<SwapParams> for OpenswapSwapParams {
     }
 }
 
-/// The Taker structure that performs bulk of the coinswap protocol. Taker connects
+/// The Taker structure that performs bulk of the openswap protocol. Taker connects
 /// to multiple Makers and send protocol messages sequentially to them. The communication
 /// sequence and corresponding SwapCoin infos are stored in `ongoing_swap_state`.
 #[derive(uniffi::Object)]
 pub struct Taker {
-    /// The Taker structure that performs bulk of the coinswap protocol.
+    /// The Taker structure that performs bulk of the openswap protocol.
     taker: Mutex<OpenswapTaker>,
 }
 
@@ -141,7 +141,7 @@ impl Taker {
     /// ### Parameters:
     /// - `data_dir`:
     ///   - `Some(value)`: Use the specified directory for storing data.
-    ///   - `None`: Use the default data directory (e.g., for Linux: `~/.coinswap/taker`).
+    ///   - `None`: Use the default data directory (e.g., for Linux: `~/.openswap/taker`).
     /// - `wallet_file_name`:
     ///   - `Some(value)`: Attempt to load a wallet file named `value`. If it does not exist,
     ///     a new wallet with the given name will be created.
@@ -218,8 +218,8 @@ impl Taker {
         Ok(())
     }
 
-    /// Prepares a coinswap and returns a swap id.
-    pub fn prepare_coinswap(&self, swap_params: SwapParams) -> Result<String, TakerError> {
+    /// Prepares an openswap and returns a swap id.
+    pub fn prepare_openswap(&self, swap_params: SwapParams) -> Result<String, TakerError> {
         let params = OpenswapSwapParams::try_from(swap_params)?;
         let mut taker = self.taker.lock().map_err(|_| TakerError::General {
             msg: "Failed to acquire taker lock".to_string(),
@@ -228,8 +228,8 @@ impl Taker {
         Ok(summary.swap_id)
     }
 
-    /// Starts execution for a prepared coinswap.
-    pub fn start_coinswap(&self, swap_id: String) -> Result<SwapReport, TakerError> {
+    /// Starts execution for a prepared openswap.
+    pub fn start_openswap(&self, swap_id: String) -> Result<SwapReport, TakerError> {
         let mut taker = self.taker.lock().map_err(|_| TakerError::General {
             msg: "Failed to acquire taker lock".to_string(),
         })?;
@@ -527,16 +527,16 @@ impl Taker {
     ) -> Result<Txid, TakerError> {
         let amount = checked_satoshi_amount(amount)?;
         let manually_selected_outpoints = manually_selected_outpoints
-            .map(|outpoints| -> Result<Vec<coinswapOutPoint>, TakerError> {
+            .map(|outpoints| -> Result<Vec<openswapOutPoint>, TakerError> {
                 outpoints
                     .into_iter()
                     .map(|op| {
-                        let txid = op.txid.value.parse::<coinswapTxid>().map_err(|e| {
+                        let txid = op.txid.value.parse::<openswapTxid>().map_err(|e| {
                             TakerError::General {
                                 msg: format!("Invalid txid: {}", e),
                             }
                         })?;
-                        Ok(coinswapOutPoint::new(txid, op.vout))
+                        Ok(openswapOutPoint::new(txid, op.vout))
                     })
                     .collect()
             })

@@ -1,6 +1,6 @@
-name: Publish coinswap to PyPI
+name: Publish openswap to PyPI
 
-# Automatic workflow for testing, publishes the coinswap Python package to PyPI as platform-specific wheels.
+# Automatic workflow for testing, publishes the openswap Python package to PyPI as platform-specific wheels.
 # Uses cibuildwheel to build wheels for multiple platforms and Python versions.
 # Triggers on push to main. Requires PyPI credentials (username and token).
 # Manual workflow that requires PyPI credentials (username and token). # commented for automatic
@@ -45,7 +45,7 @@ jobs:
 
       - name: Build wheels (Linux)
         if: runner.os == 'Linux'
-        working-directory: ./coinswap-python
+        working-directory: ./openswap-python
         run: |
           chmod +x build-scripts/release/build-release-linux-x86_64.sh
           bash build-scripts/release/build-release-linux-x86_64.sh
@@ -53,7 +53,7 @@ jobs:
 
       - name: Build wheels (macOS)
         if: runner.os == 'macOS'
-        working-directory: ./coinswap-python
+        working-directory: ./openswap-python
         run: |
           chmod +x build-scripts/release/build-release-macos-x86_64.sh
           chmod +x build-scripts/release/build-release-macos-aarch64.sh
@@ -65,7 +65,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}
-          path: coinswap-python/dist/*.whl
+          path: openswap-python/dist/*.whl
           retention-days: 7
 
   publish:
@@ -83,13 +83,13 @@ jobs:
           merge-multiple: true
 
       - name: Commit and push native libraries
-        working-directory: ./coinswap-ffi
+        working-directory: ./openswap-ffi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add coinswap-python/
+          git add openswap-python/
           if git diff --staged --quiet; then
             echo "No changes to native libraries"
           else

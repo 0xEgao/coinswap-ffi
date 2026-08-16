@@ -1,13 +1,13 @@
 [bindings.kotlin]
-package_name = "org.coinswap"
-cdylib_name = "coinswap_ffi"
+package_name = "org.openswap"
+cdylib_name = "openswap_ffi"
 
 [bindings.swift]
-module_name = "Coinswap"
-cdylib_name = "Coinswap_ffi"
+module_name = "Openswap"
+cdylib_name = "Openswap_ffi"
 
 [bindings.csharp]
-namespace = "Coinswap.Native"
-global_methods_class_name = "Coinswap"
+namespace = "Openswap.Native"
+global_methods_class_name = "Openswap"
 access_modifier = "public"
-cdylib_name = "coinswap_ffi"
+cdylib_name = "openswap_ffi"

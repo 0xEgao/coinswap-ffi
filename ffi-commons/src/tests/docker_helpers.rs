@@ -24,8 +24,8 @@ pub const BITCOIN_RPC_USER: &str = "user";
 pub const BITCOIN_RPC_PASS: &str = "password";
 pub const BITCOIN_ZMQ: &str = "tcp://127.0.0.1:28332";
 pub const ELECTRUM_URL: &str = "tcp://localhost:50001";
-pub const BITCOIND_CONTAINER: &str = "coinswap-bitcoind";
-pub const MAKER_CONTAINERS: &[&str] = &["coinswap-makerd1", "coinswap-makerd2"];
+pub const BITCOIND_CONTAINER: &str = "openswap-bitcoind";
+pub const MAKER_CONTAINERS: &[&str] = &["openswap-makerd1", "openswap-makerd2"];
 const MAKER_COUNT: usize = 2;
 const MAKER_READY_ATTEMPTS: usize = 3;
 /// The live-test process owns these until exit. Dropping a production taker can
@@ -149,7 +149,7 @@ fn init_taker(swap: &Swap) -> Arc<Taker> {
         Some(swap.wallet.into()),
         rpc_config,
         Some(9051),
-        Some("coinswap".into()),
+        Some("openswap".into()),
         BITCOIN_ZMQ.into(),
         None,
         // Each CI job owns an isolated regtest chain. Public discovery can
@@ -161,7 +161,7 @@ fn init_taker(swap: &Swap) -> Arc<Taker> {
 }
 
 fn test_data_dir(wallet: &str) -> PathBuf {
-    std::env::temp_dir().join("coinswap-ffi").join(wallet)
+    std::env::temp_dir().join("openswap-ffi").join(wallet)
 }
 
 /// Fund the taker with `total` sats across 4 fresh external addresses.
@@ -297,7 +297,7 @@ fn wait_for_suitable_makers(taker: &Taker, swap: &Swap, send: u64, maker_address
     );
 }
 
-/// Run one taker end-to-end: init → fund → sync → 2-maker coinswap → assert.
+/// Run one taker end-to-end: init → fund → sync → 2-maker openswap → assert.
 /// `send` sats are swapped; the taker is funded with `2 * send`.
 pub fn run_swap(swap: &Swap, send: u64) {
     println!(
@@ -328,9 +328,9 @@ pub fn run_swap(swap: &Swap, send: u64) {
         swap.name
     );
 
-    // 2-maker coinswap, single funding tx (tx_count = 1).
+    // 2-maker openswap, single funding tx (tx_count = 1).
     let swap_id = taker
-        .prepare_coinswap(SwapParams {
+        .prepare_openswap(SwapParams {
             protocol: Some(swap.protocol.into()),
             send_amount: send,
             maker_count: MAKER_COUNT as u32,
@@ -340,8 +340,8 @@ pub fn run_swap(swap: &Swap, send: u64) {
             preferred_makers: Some(maker_addresses),
             payment_address: None,
         })
-        .expect("prepare_coinswap");
-    let report = taker.start_coinswap(swap_id).expect("start_coinswap");
+        .expect("prepare_openswap");
+    let report = taker.start_openswap(swap_id).expect("start_openswap");
     assert_eq!(
         report.makers_count,
         Some(2),

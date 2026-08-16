@@ -1,6 +1,6 @@
 [info]
-name = "coinswap-ffi-regtest-relay"
-description = "Local nostr relay for coinswap FFI tests"
+name = "openswap-ffi-regtest-relay"
+description = "Local nostr relay for openswap FFI tests"
 
 [network]
 address = "0.0.0.0"
