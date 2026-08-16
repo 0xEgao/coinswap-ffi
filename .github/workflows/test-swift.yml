@@ -47,15 +47,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Cache SwiftPM build artifacts
+      - name: Cache SwiftPM dependencies
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.swiftpm/
-            coinswap-swift/.build/
-          key: ${{ runner.os }}-swiftpm-${{ hashFiles('coinswap-swift/Package.swift', 'coinswap-swift/Package.resolved') }}
+          # Do not cache .build: Swift PCH files embed the absolute checkout
+          # path and cannot be reused after a repository rename or relocation.
+          path: ~/.swiftpm/
+          key: ${{ runner.os }}-swiftpm-v2-${{ hashFiles('coinswap-swift/Package.swift', 'coinswap-swift/Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-swiftpm-
+            ${{ runner.os }}-swiftpm-v2-
+
+      - name: Clean SwiftPM build artifacts
+        run: swift package clean
 
       - name: Setup Docker on macOS
         uses: douglascamata/setup-docker-macos-action@v1.1.0
