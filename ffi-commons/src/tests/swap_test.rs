@@ -8,9 +8,10 @@ use crate::tests::docker_helpers::{Backend, Swap, run_swap};
 /// Amount swapped by each taker, in sats. The taker is funded with 2×.
 const SWAP_AMOUNT: u64 = 500_000;
 
-// This test targets the PRODUCTION stack: makers expose Tor onion services and
-// announce to the public Nostr relays, and the taker dials them over Tor. Run
-// with a plain `cargo test` (no --features integration-test).
+// This test uses the production Tor transport and fidelity verification, but
+// polls the current Docker stack's makers directly. Public Nostr discovery
+// cannot isolate independent CI regtest chains. Run with a plain `cargo test`
+// (no --features integration-test).
 #[test]
 fn main() {
     openswap::utill::setup_taker_logger(log::LevelFilter::Info, true, None);

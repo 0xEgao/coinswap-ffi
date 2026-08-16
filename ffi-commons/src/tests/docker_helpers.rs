@@ -11,7 +11,13 @@ use crate::{
 };
 use bitcoin::Amount;
 use bitcoind::bitcoincore_rpc::{Auth, Client, RpcApi};
-use std::{path::PathBuf, sync::Arc, thread, time::Duration};
+use std::{
+    path::PathBuf,
+    process::Command,
+    sync::{Arc, Mutex, OnceLock},
+    thread,
+    time::Duration,
+};
 
 pub const BITCOIN_RPC_URL: &str = "http://localhost:18442";
 pub const BITCOIN_RPC_USER: &str = "user";
@@ -19,10 +25,13 @@ pub const BITCOIN_RPC_PASS: &str = "password";
 pub const BITCOIN_ZMQ: &str = "tcp://127.0.0.1:28332";
 pub const ELECTRUM_URL: &str = "tcp://localhost:50001";
 pub const BITCOIND_CONTAINER: &str = "coinswap-bitcoind";
-/// Public Nostr relays for maker discovery. Passed explicitly so the test does
-/// not depend on the crate's compiled-in default (which is a local relay when
-/// built with the `integration-test` feature) or on a persisted config file.
-pub const NOSTR_RELAYS: &[&str] = &["wss://nos.lol", "wss://relay.damus.io"];
+pub const MAKER_CONTAINERS: &[&str] = &["coinswap-makerd1", "coinswap-makerd2"];
+const MAKER_COUNT: usize = 2;
+const MAKER_READY_ATTEMPTS: usize = 3;
+/// The live-test process owns these until exit. Dropping a production taker can
+/// block on its upstream watcher thread; process exit reclaims these test-only
+/// resources after all four scenarios have completed.
+static LIVE_TEST_TAKERS: OnceLock<Mutex<Vec<Arc<Taker>>>> = OnceLock::new();
 
 /// Which backend a taker connects through.
 #[derive(Clone, Copy)]
@@ -143,8 +152,9 @@ fn init_taker(swap: &Swap) -> Arc<Taker> {
         Some("coinswap".into()),
         BITCOIN_ZMQ.into(),
         None,
-        // Explicitly use the public Nostr relays for maker discovery.
-        Some(NOSTR_RELAYS.iter().map(|r| r.to_string()).collect()),
+        // Each CI job owns an isolated regtest chain. Public discovery can
+        // return makers announced by unrelated concurrent jobs.
+        Some(Vec::new()),
         backend_config,
     )
     .expect("init taker")
@@ -182,6 +192,111 @@ fn wait_for_spendable(taker: &Taker, target: i64) -> Balances {
     taker.get_balances().unwrap()
 }
 
+/// Read the two onion addresses belonging to this job's Docker stack.
+fn local_maker_addresses() -> Vec<String> {
+    const MARKER: &str = "Generated new Tor Hidden Service Hostname:";
+
+    MAKER_CONTAINERS
+        .iter()
+        .map(|container| {
+            let output = Command::new("docker")
+                .args(["logs", container])
+                .output()
+                .unwrap_or_else(|e| panic!("{container}: failed to read maker logs: {e}"));
+            assert!(
+                output.status.success(),
+                "{container}: docker logs failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let logs = format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            logs.lines()
+                .filter_map(|line| line.split_once(MARKER).map(|(_, value)| value))
+                .filter_map(|value| value.split_whitespace().next())
+                .next_back()
+                .unwrap_or_else(|| panic!("{container}: maker onion address not found in logs"))
+                .to_string()
+        })
+        .collect()
+}
+
+fn suitable_maker_count(taker: &Taker, swap: &Swap, send: u64, attempt: usize) -> usize {
+    let offers = taker.fetch_offers().expect("fetch offers");
+    let suitable_count = offers
+        .makers
+        .iter()
+        .filter(|maker| maker.state.state_type == "Good")
+        .filter(|maker| {
+            maker.protocol.as_ref().is_some_and(|protocol| {
+                protocol.protocol_type == swap.protocol || protocol.protocol_type == "Unified"
+            })
+        })
+        .filter(|maker| {
+            maker
+                .offer
+                .as_ref()
+                .is_some_and(|offer| offer.min_size <= send as i64 && send as i64 <= offer.max_size)
+        })
+        .count();
+
+    println!(
+        "{}: offerbook attempt {}/{} has {} total makers, {} suitable {} makers",
+        swap.name,
+        attempt,
+        MAKER_READY_ATTEMPTS,
+        offers.makers.len(),
+        suitable_count,
+        swap.protocol
+    );
+    for maker in &offers.makers {
+        println!(
+            "{}: maker {} state={} protocol={} amount={}",
+            swap.name,
+            maker.address.address,
+            maker.state.state_type,
+            maker
+                .protocol
+                .as_ref()
+                .map(|protocol| protocol.protocol_type.as_str())
+                .unwrap_or("None"),
+            maker
+                .offer
+                .as_ref()
+                .map(|offer| format!("{}..{} sats", offer.min_size, offer.max_size))
+                .unwrap_or_else(|| "no offer".to_string())
+        );
+    }
+    suitable_count
+}
+
+fn wait_for_suitable_makers(taker: &Taker, swap: &Swap, send: u64, maker_addresses: &[String]) {
+    let mut suitable_count = 0;
+    for attempt in 1..=MAKER_READY_ATTEMPTS {
+        for address in maker_addresses {
+            println!("{}: polling local maker {}", swap.name, address);
+            if let Err(error) = taker.poll_maker(address.clone()) {
+                eprintln!("{}: poll failed for {}: {}", swap.name, address, error);
+            }
+        }
+
+        suitable_count = suitable_maker_count(taker, swap, send, attempt);
+        if suitable_count >= MAKER_COUNT {
+            return;
+        }
+        if attempt < MAKER_READY_ATTEMPTS {
+            thread::sleep(Duration::from_secs(10));
+        }
+    }
+
+    panic!(
+        "{}: expected {} suitable {} makers for {} sats, found {}",
+        swap.name, MAKER_COUNT, swap.protocol, send, suitable_count
+    );
+}
+
 /// Run one taker end-to-end: init → fund → sync → 2-maker coinswap → assert.
 /// `send` sats are swapped; the taker is funded with `2 * send`.
 pub fn run_swap(swap: &Swap, send: u64) {
@@ -192,43 +307,14 @@ pub fn run_swap(swap: &Swap, send: u64) {
     cleanup_wallet(swap.wallet);
 
     let funding = funding_client();
+    let maker_addresses = local_maker_addresses();
     let taker = init_taker(swap);
-    taker.sync_offerbook_and_wait().unwrap();
-    let offers = taker.fetch_offers().expect("fetch offers");
-    let active_count = offers
-        .makers
-        .iter()
-        .filter(|maker| maker.state.state_type == "Good")
-        .filter(|maker| {
-            maker
-                .protocol
-                .as_ref()
-                .map(|protocol| {
-                    protocol.protocol_type == swap.protocol || protocol.protocol_type == "Unified"
-                })
-                .unwrap_or(false)
-        })
-        .count();
-    println!(
-        "{}: offerbook has {} total makers, {} active {} makers",
-        swap.name,
-        offers.makers.len(),
-        active_count,
-        swap.protocol
-    );
-    for maker in &offers.makers {
-        println!(
-            "{}: maker {} state={} protocol={}",
-            swap.name,
-            maker.address.address,
-            maker.state.state_type,
-            maker
-                .protocol
-                .as_ref()
-                .map(|protocol| protocol.protocol_type.as_str())
-                .unwrap_or("None")
-        );
-    }
+    LIVE_TEST_TAKERS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("live taker retention lock")
+        .push(Arc::clone(&taker));
+    wait_for_suitable_makers(&taker, swap, send, &maker_addresses);
 
     assert_eq!(taker.get_wallet_name().unwrap(), swap.wallet);
 
@@ -247,11 +333,11 @@ pub fn run_swap(swap: &Swap, send: u64) {
         .prepare_coinswap(SwapParams {
             protocol: Some(swap.protocol.into()),
             send_amount: send,
-            maker_count: 2,
+            maker_count: MAKER_COUNT as u32,
             tx_count: Some(1),
             required_confirms: Some(1),
             manually_selected_outpoints: None,
-            preferred_makers: None,
+            preferred_makers: Some(maker_addresses),
             payment_address: None,
         })
         .expect("prepare_coinswap");
