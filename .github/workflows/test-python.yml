@@ -28,7 +28,7 @@ jobs:
   test-python:
     name: Test Python Bindings
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 45
     
     steps:
       - name: Checkout repository
@@ -151,12 +151,18 @@ jobs:
         run: |
           bash ./build-scripts/development/build-dev-linux-x86_64.sh
 
-      - name: Run Python test (swap_test.py)
+      - name: Run isolated Python swap tests
         working-directory: ./openswap-python
         run: |
-          echo "Running Python swap test (4 takers × 2 makers)..."
-          python3 -u test/swap_test.py
-        continue-on-error: false
+          set -euo pipefail
+
+          # Keep the stack alive, but use a fresh interpreter for each native
+          # Taker so completed cases cannot retain Tor connections.
+          for test_case in legacy_rpc taproot_rpc legacy_electrum taproot_electrum; do
+            echo "Running Python swap test: ${test_case}"
+            timeout --signal=TERM --kill-after=30s 10m \
+              python3 -u test/swap_test.py "${test_case}"
+          done
 
       - name: Cleanup Docker environment
         if: always()

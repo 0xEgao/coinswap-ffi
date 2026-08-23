@@ -1,8 +1,8 @@
-//! FFI taker integration test: 4 takers × 2 makers.
+//! FFI taker integration test: one taker × 2 makers per process.
 //!
-//! One test drives four takers sequentially against the Docker regtest stack
-//! (1 RPC maker + 1 Electrum maker), covering the full backend × protocol
-//! matrix. Each taker funds a fresh wallet and runs a 2-maker openswap.
+//! CI invokes this test four times with `OPENSWAP_SWAP_CASE`, once for each
+//! backend × protocol scenario. A fresh test process prevents completed
+//! takers from retaining Tor connections needed by a later scenario.
 
 use crate::tests::docker_helpers::{Backend, Swap, run_swap};
 /// Amount swapped by each taker, in sats. The taker is funded with 2×.
@@ -11,7 +11,8 @@ const SWAP_AMOUNT: u64 = 500_000;
 // This test uses the production Tor transport and fidelity verification, but
 // polls the current Docker stack's makers directly. Public Nostr discovery
 // cannot isolate independent CI regtest chains. Run with a plain `cargo test`
-// (no --features integration-test).
+// (no --features integration-test). CI sets `OPENSWAP_SWAP_CASE` so each
+// invocation runs exactly one scenario.
 #[test]
 fn main() {
     openswap::utill::setup_taker_logger(log::LevelFilter::Info, true, None);
@@ -47,9 +48,21 @@ fn main() {
         },
     ];
 
-    for swap in &swaps {
-        run_swap(swap, SWAP_AMOUNT);
-    }
+    let requested = std::env::var("OPENSWAP_SWAP_CASE")
+        .expect("OPENSWAP_SWAP_CASE must select one swap scenario");
+    let swap = swaps
+        .iter()
+        .find(|swap| swap.name == requested)
+        .unwrap_or_else(|| {
+            panic!(
+                "unknown OPENSWAP_SWAP_CASE={requested:?}; expected one of: {}",
+                swaps
+                    .iter()
+                    .map(|swap| swap.name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        });
 
-    println!("\n✓ all 4 takers (legacy/taproot × rpc/electrum) completed 2-maker swaps");
+    run_swap(swap, SWAP_AMOUNT);
 }

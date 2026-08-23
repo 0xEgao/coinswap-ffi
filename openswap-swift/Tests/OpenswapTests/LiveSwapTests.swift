@@ -2,12 +2,11 @@ import Foundation
 import XCTest
 import Openswap
 
-/// Consolidated live swap suite covering the full backend x protocol matrix.
+/// Live swap suite covering the full backend x protocol matrix.
 ///
-/// Runs against the Docker regtest stack (1 RPC maker + 1 Electrum maker). Each
-/// taker: init -> fund (0.25 BTC x 4 fresh external addresses = 1.0 BTC) ->
-/// sync until funds are visible -> 2-maker openswap -> assert the report routed
-/// through 2 makers and the status reports SUCCESS.
+/// CI filters each method into a separate XCTest process while keeping the
+/// Docker stack alive. This prevents completed takers from retaining Tor
+/// resources needed by a later scenario.
 final class LiveSwapTests: XCTestCase {
     /// Sats swapped per taker (funded with 1.0 BTC, well above this).
     private let swapAmount: UInt64 = 500_000

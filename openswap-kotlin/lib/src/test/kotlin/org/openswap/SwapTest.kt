@@ -17,9 +17,17 @@ import kotlin.test.assertTrue
 
 class SwapTest {
 
+    companion object {
+        /** Keep the native handle alive until this case's JVM exits. */
+        private val liveTakers = mutableListOf<Taker>()
+    }
+
     private enum class Backend { RPC, ELECTRUM }
 
     private val swapAmount = 500_000uL
+    private val makerCount = 2u
+    private val makerContainers = listOf("openswap-makerd1", "openswap-makerd2")
+    private val makerReadyAttempts = 3
 
     /** Fund [address] with [btc] BTC from the Docker bitcoind `test` wallet. */
     private fun fund(address: String, btc: String) {
@@ -42,6 +50,79 @@ class SwapTest {
             Thread.sleep(3000)
         }
         return taker.getBalances()
+    }
+
+    /** Read the onion addresses belonging to this job's two Docker makers. */
+    private fun localMakerAddresses(): List<String> {
+        val marker = "Generated new Tor Hidden Service Hostname:"
+        return makerContainers.map { container ->
+            val process = ProcessBuilder("docker", "logs", container)
+                .redirectErrorStream(true)
+                .start()
+            val logs = process.inputStream.bufferedReader().readText()
+            check(process.waitFor() == 0) { "$container: failed to read maker logs: $logs" }
+
+            logs.lineSequence()
+                .filter { marker in it }
+                .map { it.substringAfter(marker).trim().substringBefore(' ') }
+                .lastOrNull()
+                ?: error("$container: maker onion address not found in logs")
+        }
+    }
+
+    /** Poll only this job's makers and wait until both offers are usable. */
+    private fun waitForSuitableMakers(
+        taker: Taker,
+        name: String,
+        protocol: String,
+        makerAddresses: List<String>,
+    ) {
+        var suitableCount = 0
+
+        repeat(makerReadyAttempts) { attemptIndex ->
+            val attempt = attemptIndex + 1
+            makerAddresses.forEach { address ->
+                try {
+                    println("  polling local maker $address")
+                    taker.pollMaker(address)
+                } catch (error: Exception) {
+                    println("  poll failed for $address: ${error.message}")
+                }
+            }
+
+            val offerbook = taker.fetchOffers()
+            val suitable = offerbook.makers.filter { maker ->
+                maker.state.stateType == "Good" &&
+                    maker.protocol?.protocolType in listOf(protocol, "Unified") &&
+                    maker.offer?.let { offer ->
+                        offer.minSize <= swapAmount.toLong() &&
+                            swapAmount.toLong() <= offer.maxSize
+                    } == true
+            }
+            suitableCount = suitable.size
+            println(
+                "$name: offerbook attempt $attempt/$makerReadyAttempts has " +
+                    "${offerbook.makers.size} total makers, $suitableCount suitable $protocol makers",
+            )
+            offerbook.makers.forEach { maker ->
+                val makerProtocol = maker.protocol?.protocolType ?: "None"
+                val amountRange = maker.offer?.let { "${it.minSize}..${it.maxSize} sats" }
+                    ?: "no offer"
+                println(
+                    "  ${maker.address.address}: state=${maker.state.stateType}, " +
+                        "protocol=$makerProtocol, amount=$amountRange",
+                )
+            }
+            System.out.flush()
+
+            if (suitableCount >= makerCount.toInt()) return
+            if (attempt < makerReadyAttempts) Thread.sleep(10_000)
+        }
+
+        error(
+            "$name: expected $makerCount suitable $protocol makers for " +
+                "$swapAmount sats, found $suitableCount",
+        )
     }
 
     /** Run one taker end-to-end: init → fund → sync → 2-maker openswap → assert. */
@@ -72,6 +153,7 @@ class SwapTest {
             )
         } else null
 
+        val makerAddresses = localMakerAddresses()
         val taker = Taker.init(
             dataDir = dataDir.toString(),
             walletFileName = name,
@@ -80,11 +162,13 @@ class SwapTest {
             torAuthPassword = "openswap",
             zmqAddr = "tcp://localhost:28332",
             password = "",
-            nostrRelays = null,
+            // Public discovery can return makers from another concurrent CI job.
+            nostrRelays = emptyList(),
             backendConfig = backendConfig,
         )
+        synchronized(liveTakers) { liveTakers.add(taker) }
 
-        taker.syncOfferbookAndWait()
+        waitForSuitableMakers(taker, name, protocol, makerAddresses)
 
         // Fund with 2x the swap amount across 4 fresh addresses.
         val quarterBtc = "0.0025" // 250,000 sats; 4x = 1,000,000 = 2 * swapAmount
@@ -102,17 +186,17 @@ class SwapTest {
             SwapParams(
                 protocol = protocol,
                 sendAmount = swapAmount,
-                makerCount = 2u,
+                makerCount = makerCount,
                 txCount = 1u,
                 requiredConfirms = 1u,
                 manuallySelectedOutpoints = null,
-                preferredMakers = null,
+                preferredMakers = makerAddresses,
                 paymentAddress = null,
             ),
         )
         val report = taker.startOpenswap(swapId)
         assertNotNull(report)
-        assertEquals(2u, report.makersCount, "$name: should route through 2 makers")
+        assertEquals(makerCount, report.makersCount, "$name: should route through 2 makers")
         assertTrue(
             report.status.uppercase().contains("SUCCESS"),
             "$name: swap status was ${report.status}",
@@ -121,18 +205,18 @@ class SwapTest {
     }
 
     @Test
-    fun `legacy rpc swap`(@TempDir dir: Path) =
+    fun legacyRpcSwap(@TempDir dir: Path) =
         runSwap("legacy_rpc", dir, Backend.RPC, "Legacy", "P2WPKH")
 
     @Test
-    fun `taproot rpc swap`(@TempDir dir: Path) =
+    fun taprootRpcSwap(@TempDir dir: Path) =
         runSwap("taproot_rpc", dir, Backend.RPC, "Taproot", "P2TR")
 
     @Test
-    fun `legacy electrum swap`(@TempDir dir: Path) =
+    fun legacyElectrumSwap(@TempDir dir: Path) =
         runSwap("legacy_electrum", dir, Backend.ELECTRUM, "Legacy", "P2WPKH")
 
     @Test
-    fun `taproot electrum swap`(@TempDir dir: Path) =
+    fun taprootElectrumSwap(@TempDir dir: Path) =
         runSwap("taproot_electrum", dir, Backend.ELECTRUM, "Taproot", "P2TR")
 }
