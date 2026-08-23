@@ -1,9 +1,8 @@
-"""FFI taker integration test: 4 takers × 2 makers.
+"""FFI taker integration test: one taker × 2 makers per process.
 
-Mirrors the Rust `swap_test`: one test driving four takers sequentially against
-the Docker regtest stack (1 RPC maker + 1 Electrum maker), covering the full
-backend × protocol matrix — legacy/taproot over rpc/electrum. Each taker funds a
-fresh wallet and runs a 2-maker openswap.
+CI invokes this script once for each backend × protocol scenario. Each fresh
+Python process prevents a completed native Taker from retaining Tor resources
+needed by a later scenario.
 """
 
 import os
@@ -24,8 +23,8 @@ MAKER_COUNT = 2
 MAKER_READY_ATTEMPTS = 3
 MAKER_READY_RETRY_SECS = 10
 MAKER_CONTAINERS = ("openswap-makerd1", "openswap-makerd2")
-# Retain native handles between scenarios; os._exit in main bypasses their
-# blocking upstream destructor when this dedicated live-test process finishes.
+# Retain the native handle until os._exit bypasses its blocking upstream
+# destructor at the end of this dedicated live-test process.
 LIVE_TEST_TAKERS = []
 
 
@@ -217,13 +216,27 @@ SWAPS = [
 
 
 def main():
+    if len(sys.argv) != 2:
+        choices = ", ".join(swap[0] for swap in SWAPS)
+        print(f"usage: {sys.argv[0]} <case>\nvalid cases: {choices}", file=sys.stderr)
+        sys.exit(2)
+
+    requested = sys.argv[1]
+    selected = next((swap for swap in SWAPS if swap[0] == requested), None)
+    if selected is None:
+        choices = ", ".join(swap[0] for swap in SWAPS)
+        print(
+            f"unknown swap case {requested!r}; expected one of: {choices}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     base_dir = os.path.expanduser("~/.openswap/taker")
     exit_code = 0
     try:
-        for name, backend, protocol, addr_type in SWAPS:
-            data_dir = os.path.join(base_dir, name)
-            run_swap(name, data_dir, backend, protocol, addr_type)
-        print("\n✓ all 4 takers (legacy/taproot × rpc/electrum) completed 2-maker swaps")
+        name, backend, protocol, addr_type = selected
+        data_dir = os.path.join(base_dir, name)
+        run_swap(name, data_dir, backend, protocol, addr_type)
     except Exception as e:
         print(f"\n✗ Error: {type(e).__name__}: {e}")
         import traceback

@@ -102,10 +102,20 @@ jobs:
           done
           $ok || { echo "Timed out waiting for local makers"; exit 1; }
 
-      - name: Run taker swap test (legacy/taproot x rpc/electrum, 2 makers)
+      - name: Run isolated taker swap tests (legacy/taproot x rpc/electrum)
         working-directory: ./ffi-commons
-        timeout-minutes: 30
-        run: cargo test tests::swap_test::main -- --nocapture --exact
+        timeout-minutes: 40
+        run: |
+          set -euo pipefail
+
+          # A native Taker retains background Tor services. Give every swap a
+          # fresh test process so an earlier case cannot starve a later one.
+          for test_case in legacy_rpc taproot_rpc legacy_electrum taproot_electrum; do
+            echo "Running Rust swap test: ${test_case}"
+            timeout --signal=TERM --kill-after=30s 10m \
+              env OPENSWAP_SWAP_CASE="${test_case}" \
+              cargo test tests::swap_test::main -- --nocapture --exact
+          done
 
       - name: Cleanup Docker environment
         if: always()

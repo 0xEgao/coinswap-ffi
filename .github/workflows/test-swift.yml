@@ -145,9 +145,18 @@ jobs:
           done
           $ok || { echo "Timed out waiting for local makers"; exit 1; }
 
-      - name: "Run Swift live swap tests (backend x protocol matrix)"
-        timeout-minutes: 25
-        run: sudo -E swift test --filter LiveSwapTests
+      - name: "Run isolated Swift live swap tests"
+        timeout-minutes: 35
+        run: |
+          set -euo pipefail
+
+          # SwiftPM reuses its build output, but each invocation gets a fresh
+          # XCTest process and therefore a fresh set of Tor resources.
+          for test_case in testLegacyRpc testTaprootRpc testLegacyElectrum testTaprootElectrum; do
+            echo "Running Swift swap test: ${test_case}"
+            sudo -E swift test \
+              --filter "OpenswapTests.LiveSwapTests/${test_case}"
+          done
 
       - name: Cleanup Docker environment
         if: always()

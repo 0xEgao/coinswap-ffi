@@ -82,7 +82,7 @@ generate_torrc() {
     cat > "$torrc_file" << EOF
 SocksPort 0.0.0.0:${TOR_SOCKS_PORT}
 ControlPort 0.0.0.0:${TOR_CONTROL_PORT}
-HashedControlPassword 16:16E946B27E1A526E60A2B64061EC3F140ACA991F1B705ACD35374D6730
+HashedControlPassword 16:16E946B27E1A526E602098661374FED04D4633D22A532202AD21F22D39
 DataDirectory /var/lib/tor
 EOF
     print_success "Generated torrc: $torrc_file"
