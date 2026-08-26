@@ -171,11 +171,16 @@ pub enum TakerError {
 impl From<OpenswapTakerError> for TakerError {
     fn from(error: OpenswapTakerError) -> Self {
         match error {
-            OpenswapTakerError::Wallet(e) => TakerError::Wallet {
-                msg: format!("{:?}", e),
+            OpenswapTakerError::Wallet(error) => TakerError::Wallet {
+                msg: error.to_string(),
             },
             OpenswapTakerError::General(msg) => TakerError::General { msg },
-            OpenswapTakerError::IO(e) => TakerError::IO { msg: e.to_string() },
+            OpenswapTakerError::IO(error) => TakerError::IO {
+                msg: error.to_string(),
+            },
+            OpenswapTakerError::Net(error) => TakerError::Network {
+                msg: error.to_string(),
+            },
             _ => TakerError::General {
                 msg: format!("Taker error: {:?}", error),
             },
@@ -546,7 +551,7 @@ impl From<csMakerState> for MakerState {
 /// Protocol which maker follows
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct MakerProtocol {
-    /// Protocol type: "Legacy" or "Taproot"
+    /// Maker capability: "Legacy", "Taproot", or "Unified".
     pub protocol_type: String,
 }
 
@@ -580,7 +585,10 @@ impl TryFrom<AddressType> for csAddressType {
             "P2TR" => Ok(csAddressType::P2TR),
             "P2WPKH" => Ok(csAddressType::P2WPKH),
             _ => Err(TakerError::General {
-                msg: format!("Invalid address type: {}", addr.addr_type),
+                msg: format!(
+                    "Invalid address type: {} (expected P2WPKH or P2TR)",
+                    addr.addr_type
+                ),
             }),
         }
     }
@@ -855,8 +863,8 @@ pub fn restore_wallet_gui_app(
 pub fn is_wallet_encrypted(wallet_path: String) -> Result<bool, TakerError> {
     let path = PathBuf::from(wallet_path);
 
-    openswap::wallet::Wallet::is_wallet_encrypted(&path).map_err(|e| TakerError::Wallet {
-        msg: format!("Failed to check wallet encryption: {:?}", e),
+    openswap::wallet::Wallet::is_wallet_encrypted(&path).map_err(|error| TakerError::Wallet {
+        msg: format!("Failed to check wallet encryption: {error}"),
     })
 }
 
@@ -905,8 +913,13 @@ mod contract_tests {
             SignedAmount as OpenswapSignedAmount, Txid as OpenswapTxid,
             absolute::{Height, LockTime as OpenswapLockTime, Time},
         },
+        error::NetError,
+        taker::error::TakerError as OpenswapTakerError,
         taker::offers::{MakerProtocol as OpenswapMakerProtocol, MakerState as OpenswapMakerState},
-        wallet::{AddressType as OpenswapAddressType, BackendConfig as OpenswapBackendConfig},
+        wallet::{
+            AddressType as OpenswapAddressType, BackendConfig as OpenswapBackendConfig,
+            WalletError as OpenswapWalletError,
+        },
     };
     use std::str::FromStr;
 
@@ -1054,7 +1067,7 @@ mod contract_tests {
                 })
                 .unwrap_err()
             ),
-            "Invalid address type: p2tr"
+            "Invalid address type: p2tr (expected P2WPKH or P2TR)"
         );
     }
 
@@ -1147,6 +1160,23 @@ mod contract_tests {
         for (error, expected) in errors {
             assert_eq!(error.to_string(), expected);
         }
+    }
+
+    #[test]
+    fn upstream_taker_errors_keep_their_display_text_and_category() {
+        let wallet_error = TakerError::from(OpenswapTakerError::Wallet(
+            OpenswapWalletError::General("wallet detail".into()),
+        ));
+        assert!(matches!(
+            wallet_error,
+            TakerError::Wallet { msg } if msg == "wallet detail"
+        ));
+
+        let network_error = TakerError::from(OpenswapTakerError::Net(NetError::ConnectionTimedOut));
+        assert!(matches!(
+            network_error,
+            TakerError::Network { msg } if msg == "ConnectionTimedOut"
+        ));
     }
 
     #[test]

@@ -59,7 +59,7 @@ impl TryFrom<SwapParams> for OpenswapSwapParams {
       "Taproot" | "taproot" => ProtocolVersion::Taproot,
       other => {
         return Err(napi::Error::from_reason(format!(
-          "Invalid protocol: {} (expected legacy, taproot, or unified)",
+          "Invalid protocol: {} (expected legacy or taproot)",
           other
         )));
       }
@@ -74,7 +74,7 @@ impl TryFrom<SwapParams> for OpenswapSwapParams {
           .into_iter()
           .map(|outpoint| {
             let txid = csTxid::from_str(&outpoint.txid)
-              .map_err(|e| napi::Error::from_reason(format!("Invalid txid: {:?}", e)))?;
+              .map_err(|error| napi::Error::from_reason(format!("Invalid txid: {error}")))?;
             Ok(BitcoinOutPoint::new(txid, outpoint.vout))
           })
           .collect::<Result<Vec<_>, _>>()
@@ -84,8 +84,9 @@ impl TryFrom<SwapParams> for OpenswapSwapParams {
     let payment_address = params
       .payment_address
       .map(|address| {
-        BitcoinAddress::<NetworkUnchecked>::from_str(&address)
-          .map_err(|e| napi::Error::from_reason(format!("Invalid payment address: {}", e)))
+        BitcoinAddress::<NetworkUnchecked>::from_str(&address).map_err(|error| {
+          napi::Error::from_reason(format!("Invalid payment address '{address}': {error}"))
+        })
       })
       .transpose()?;
 
@@ -159,26 +160,35 @@ mod tests {
   #[test]
   fn swap_params_validate_user_supplied_protocol_outpoint_and_address() {
     let protocol_error = OpenswapSwapParams::try_from(params(Some("Unified"), 1)).unwrap_err();
-    assert!(protocol_error
-      .reason
-      .starts_with("Invalid protocol: Unified"));
+    assert_eq!(
+      protocol_error.reason,
+      "Invalid protocol: Unified (expected legacy or taproot)"
+    );
 
+    let invalid_txid = "not-a-txid";
+    let txid_error = csTxid::from_str(invalid_txid).unwrap_err();
     let mut invalid_outpoint = params(None, 1);
     invalid_outpoint.manually_selected_outpoints = Some(vec![OutPoint {
-      txid: "not-a-txid".to_owned(),
+      txid: invalid_txid.to_owned(),
       vout: 0,
     }]);
-    assert!(OpenswapSwapParams::try_from(invalid_outpoint)
-      .unwrap_err()
-      .reason
-      .starts_with("Invalid txid:"));
+    assert_eq!(
+      OpenswapSwapParams::try_from(invalid_outpoint)
+        .unwrap_err()
+        .reason,
+      format!("Invalid txid: {txid_error}")
+    );
 
-    let mut invalid_address = params(None, 1);
-    invalid_address.payment_address = Some("not-an-address".to_owned());
-    assert!(OpenswapSwapParams::try_from(invalid_address)
-      .unwrap_err()
-      .reason
-      .starts_with("Invalid payment address:"));
+    let invalid_address = "not-an-address";
+    let address_error = BitcoinAddress::<NetworkUnchecked>::from_str(invalid_address).unwrap_err();
+    let mut invalid_address_params = params(None, 1);
+    invalid_address_params.payment_address = Some(invalid_address.to_owned());
+    assert_eq!(
+      OpenswapSwapParams::try_from(invalid_address_params)
+        .unwrap_err()
+        .reason,
+      format!("Invalid payment address '{invalid_address}': {address_error}")
+    );
   }
 }
 
@@ -435,7 +445,7 @@ impl Taker {
       .map_err(|e| napi::Error::from_reason(format!("Failed to acquire wallet lock: {}", e)))?;
     let txns = wallet
       .get_transactions(count.map(|c| c as usize), skip.map(|s| s as usize))
-      .map_err(|e| napi::Error::from_reason(format!("Get Transactions Error: {:?}", e)))?;
+      .map_err(|error| napi::Error::from_reason(format!("Get transactions error: {error}")))?;
 
     Ok(
       txns
@@ -504,7 +514,9 @@ impl Taker {
     let wallet = &mut *wallet;
     let internal_addresses = wallet
       .get_next_internal_addresses(count, cs_address_type)
-      .map_err(|e| napi::Error::from_reason(format!("Get internal addresses error: {:?}", e)))?;
+      .map_err(|error| {
+        napi::Error::from_reason(format!("Get internal addresses error: {error}"))
+      })?;
     Ok(internal_addresses.into_iter().map(Address::from).collect())
   }
 
@@ -521,7 +533,9 @@ impl Taker {
       .map_err(|e| napi::Error::from_reason(format!("Failed to acquire wallet lock: {}", e)))?;
     let external_address = wallet
       .get_next_external_address(cs_address_type)
-      .map_err(|e| napi::Error::from_reason(format!("Get next external address error: {:?}", e)))?;
+      .map_err(|error| {
+        napi::Error::from_reason(format!("Get next external address error: {error}"))
+      })?;
     Ok(Address::from(external_address))
   }
 
@@ -658,7 +672,7 @@ impl Taker {
       .write()
       .map_err(|e| napi::Error::from_reason(format!("Failed to acquire wallet lock: {}", e)))?
       .backup_wallet_gui_app(destination_path, password)
-      .map_err(|e| napi::Error::from_reason(format!("App's Backup error: {:?}", e)))?;
+      .map_err(|error| napi::Error::from_reason(format!("Backup error: {error}")))?;
 
     Ok(())
   }
@@ -693,7 +707,7 @@ impl Taker {
       .write()
       .map_err(|e| napi::Error::from_reason(format!("Failed to acquire wallet lock: {}", e)))?
       .lock_unspendable_utxos()
-      .map_err(|e| napi::Error::from_reason(format!("Lock error: {:?}", e)))?;
+      .map_err(|error| napi::Error::from_reason(format!("Lock error: {error}")))?;
     Ok(())
   }
 
@@ -712,7 +726,7 @@ impl Taker {
           .into_iter()
           .map(|outpoint| {
             let txid = csTxid::from_str(&outpoint.txid)
-              .map_err(|e| napi::Error::from_reason(format!("Invalid txid: {:?}", e)))?;
+              .map_err(|error| napi::Error::from_reason(format!("Invalid txid: {error}")))?;
             Ok(BitcoinOutPoint::new(txid, outpoint.vout))
           })
           .collect::<Result<Vec<_>, _>>()
@@ -727,7 +741,7 @@ impl Taker {
       .write()
       .map_err(|e| napi::Error::from_reason(format!("Failed to acquire wallet lock: {}", e)))?
       .send_to_address(amount, address, fee_rate, manually_selected_outpoints)
-      .map_err(|e| napi::Error::from_reason(format!("Send to Address error: {:?}", e)))?;
+      .map_err(|error| napi::Error::from_reason(format!("Send to address error: {error}")))?;
     Ok(txid.into())
   }
 
@@ -744,7 +758,7 @@ impl Taker {
       .map_err(|e| napi::Error::from_reason(format!("Failed to acquire wallet lock: {}", e)))?;
     let balances = wallet
       .get_balances()
-      .map_err(|e| napi::Error::from_reason(format!("Get balances error: {:?}", e)))?;
+      .map_err(|error| napi::Error::from_reason(format!("Get balances error: {error}")))?;
     Ok(Balances::from(balances))
   }
 
@@ -759,7 +773,7 @@ impl Taker {
       .write()
       .map_err(|e| napi::Error::from_reason(format!("Failed to acquire wallet lock: {}", e)))?
       .sync_and_save(&AtomicBool::new(false))
-      .map_err(|e| napi::Error::from_reason(format!("Sync wallet error: {:?}", e)))?;
+      .map_err(|error| napi::Error::from_reason(format!("Sync wallet error: {error}")))?;
     Ok(())
   }
 
@@ -778,7 +792,7 @@ impl Taker {
     });
 
     serde_json::to_string_pretty(&offer_json)
-      .map_err(|e| napi::Error::from_reason(format!("JSON error: {:?}", e)))
+      .map_err(|error| napi::Error::from_reason(format!("Failed to serialize offer: {error}")))
   }
 
   /// Recover from a failed swap
@@ -832,8 +846,9 @@ impl Taker {
   pub fn is_wallet_encrypted(wallet_path: String) -> Result<bool> {
     let path = PathBuf::from(wallet_path);
 
-    openswap::wallet::Wallet::is_wallet_encrypted(&path)
-      .map_err(|e| napi::Error::from_reason(format!("Failed to check wallet encryption: {:?}", e)))
+    openswap::wallet::Wallet::is_wallet_encrypted(&path).map_err(|error| {
+      napi::Error::from_reason(format!("Failed to check wallet encryption: {error}"))
+    })
   }
 
   #[napi]
@@ -843,9 +858,9 @@ impl Taker {
       .lock()
       .map_err(|e| napi::Error::from_reason(format!("Failed to acquire taker lock: {}", e)))?;
 
-    let is_deniable = taker
-      .verify_deniability(&swap_id)
-      .map_err(|e| napi::Error::from_reason(format!("Deniability verification error: {:?}", e)))?;
+    let is_deniable = taker.verify_deniability(&swap_id).map_err(|error| {
+      napi::Error::from_reason(format!("Deniability verification error: {error}"))
+    })?;
 
     Ok(is_deniable)
   }

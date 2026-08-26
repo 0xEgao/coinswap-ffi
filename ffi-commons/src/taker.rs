@@ -105,7 +105,7 @@ fn format_offer(maker_offer: &Offer) -> Result<String, TakerError> {
     });
 
     serde_json::to_string_pretty(&offer_json).map_err(|error| TakerError::General {
-        msg: error.to_string(),
+        msg: format!("Failed to serialize offer: {error}"),
     })
 }
 
@@ -126,8 +126,8 @@ impl TryFrom<SwapParams> for OpenswapSwapParams {
             .map(|address| {
                 address
                     .parse::<OpenswapAddress<NetworkUnchecked>>()
-                    .map_err(|e| TakerError::General {
-                        msg: format!("Invalid payment address: {}", e),
+                    .map_err(|error| TakerError::General {
+                        msg: format!("Invalid payment address '{address}': {error}"),
                     })
             })
             .transpose()?;
@@ -276,8 +276,8 @@ impl Taker {
         })?;
         let txns = wallet
             .get_transactions(count.map(|c| c as usize), skip.map(|s| s as usize))
-            .map_err(|e| TakerError::Wallet {
-                msg: format!("Get Transactions Error: {:?}", e),
+            .map_err(|error| TakerError::Wallet {
+                msg: format!("Get transactions error: {error}"),
             })?;
 
         Ok(txns
@@ -334,8 +334,8 @@ impl Taker {
         let wallet = &mut *wallet;
         let internal_addresses = wallet
             .get_next_internal_addresses(count, cs_address_type)
-            .map_err(|e| TakerError::Wallet {
-                msg: format!("Get internal addresses error: {:?}", e),
+            .map_err(|error| TakerError::Wallet {
+                msg: format!("Get internal addresses error: {error}"),
             })?;
         Ok(internal_addresses.into_iter().map(Address::from).collect())
     }
@@ -355,11 +355,12 @@ impl Taker {
             .map_err(|_| TakerError::General {
                 msg: "Failed to acquire wallet write lock".to_string(),
             })?;
-        let external_address = wallet
-            .get_next_external_address(cs_address_type)
-            .map_err(|e| TakerError::Wallet {
-                msg: format!("Get next external address error: {:?}", e),
-            })?;
+        let external_address =
+            wallet
+                .get_next_external_address(cs_address_type)
+                .map_err(|error| TakerError::Wallet {
+                    msg: format!("Get next external address error: {error}"),
+                })?;
         Ok(Address::from(external_address))
     }
 
@@ -518,8 +519,8 @@ impl Taker {
                 msg: "Failed to acquire wallet write lock".to_string(),
             })?
             .backup_wallet_gui_app(destination_path, password)
-            .map_err(|e| TakerError::Wallet {
-                msg: format!("Backup error: {:?}", e),
+            .map_err(|error| TakerError::Wallet {
+                msg: format!("Backup error: {error}"),
             })?;
         Ok(())
     }
@@ -536,8 +537,8 @@ impl Taker {
                 msg: "Failed to acquire wallet write lock".to_string(),
             })?
             .lock_unspendable_utxos()
-            .map_err(|e| TakerError::Wallet {
-                msg: format!("Lock error: {:?}", e),
+            .map_err(|error| TakerError::Wallet {
+                msg: format!("Lock error: {error}"),
             })?;
         Ok(())
     }
@@ -563,8 +564,8 @@ impl Taker {
                 msg: "Failed to acquire wallet write lock".to_string(),
             })?
             .send_to_address(amount, address, fee_rate, manually_selected_outpoints)
-            .map_err(|e| TakerError::Wallet {
-                msg: format!("Send to Address error: {:?}", e),
+            .map_err(|error| TakerError::Wallet {
+                msg: format!("Send to address error: {error}"),
             })?;
         Ok(txid.into())
     }
@@ -580,8 +581,8 @@ impl Taker {
         let wallet = taker.get_wallet().read().map_err(|_| TakerError::General {
             msg: "Failed to acquire wallet read lock".to_string(),
         })?;
-        let balances = wallet.get_balances().map_err(|e| TakerError::Wallet {
-            msg: format!("Get balances error: {:?}", e),
+        let balances = wallet.get_balances().map_err(|error| TakerError::Wallet {
+            msg: format!("Get balances error: {error}"),
         })?;
         Ok(Balances::from(balances))
     }
@@ -601,19 +602,16 @@ impl Taker {
                 msg: "Failed to acquire wallet write lock".to_string(),
             })?
             .sync_and_save(&openswap::utill::NO_SHUTDOWN)
-            .map_err(|e| TakerError::Wallet {
-                msg: format!("Sync wallet error: {:?}", e),
+            .map_err(|error| TakerError::Wallet {
+                msg: format!("Sync wallet error: {error}"),
             })?;
         Ok(())
     }
 
     /// Runs a full offerbook sync cycle and blocks until it completes.
     pub fn sync_offerbook_and_wait(&self) -> Result<(), TakerError> {
-        let taker = self.taker.lock().map_err(|e| TakerError::General {
-            msg: format!(
-                "Failed to acquire taker lock for offerbook sync check: {:?}",
-                e
-            ),
+        let taker = self.taker.lock().map_err(|_| TakerError::General {
+            msg: "Failed to acquire taker lock".to_string(),
         })?;
         taker
             .sync_offerbook_and_wait()
@@ -708,11 +706,12 @@ impl Taker {
             msg: "Failed to acquire taker lock".to_string(),
         })?;
 
-        let is_deniable = taker
-            .verify_deniability(&swap_id)
-            .map_err(|e| TakerError::General {
-                msg: format!("Deniability verification error: {:?}", e),
-            })?;
+        let is_deniable =
+            taker
+                .verify_deniability(&swap_id)
+                .map_err(|error| TakerError::General {
+                    msg: format!("Deniability verification error: {error}"),
+                })?;
         Ok(is_deniable)
     }
 }
@@ -725,7 +724,13 @@ mod contract_tests {
     use crate::types::{
         Amount, FidelityBond, FidelityProof, LockTime, Offer, OutPoint, PublicKey, TakerError, Txid,
     };
-    use openswap::{bitcoin::Amount as OpenswapAmount, protocol::ProtocolVersion};
+    use openswap::{
+        bitcoin::{
+            Address as OpenswapAddress, Amount as OpenswapAmount, Txid as OpenswapTxid,
+            address::NetworkUnchecked,
+        },
+        protocol::ProtocolVersion,
+    };
 
     fn error_message(error: TakerError) -> String {
         match error {
@@ -833,20 +838,26 @@ mod contract_tests {
 
     #[test]
     fn outpoint_and_payment_address_validation_fails_before_wallet_access() {
+        let invalid_txid = "not-a-txid";
+        let txid_error = invalid_txid.parse::<OpenswapTxid>().unwrap_err();
         let error = parse_outpoints(Some(vec![OutPoint {
             txid: Txid {
-                value: "not-a-txid".to_string(),
+                value: invalid_txid.to_string(),
             },
             vout: 0,
         }]))
         .unwrap_err();
-        assert!(error_message(error).starts_with("Invalid txid:"));
+        assert_eq!(error_message(error), format!("Invalid txid: {txid_error}"));
 
+        let invalid_address = "not-a-bitcoin-address";
+        let address_error = invalid_address
+            .parse::<OpenswapAddress<NetworkUnchecked>>()
+            .unwrap_err();
         let mut params = swap_params(None);
-        params.payment_address = Some("not-a-bitcoin-address".to_string());
-        assert!(
-            error_message(openswap::taker::api::SwapParams::try_from(params).unwrap_err())
-                .starts_with("Invalid payment address:")
+        params.payment_address = Some(invalid_address.to_string());
+        assert_eq!(
+            error_message(openswap::taker::api::SwapParams::try_from(params).unwrap_err()),
+            format!("Invalid payment address '{invalid_address}': {address_error}")
         );
     }
 
