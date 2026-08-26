@@ -18,15 +18,17 @@ ffi-commons/.block-mining.pid
 # Kotlin/Swift/Ruby generated files
 openswap-python/libopenswap_ffi.so
 openswap-kotlin/libopenswap_ffi.so
-openswap-kotlin/src/main/kotlin/uniffi/
-openswap-kotlin/src/main/resources/
+openswap-kotlin/lib/src/main/kotlin/org/openswap/openswap.kt
+openswap-kotlin/lib/src/main/jniLibs/
 openswap-kotlin/local.properties
 openswap-swift/libopenswap_ffi.so
 openswap-swift/Openswap.swift
 openswap-swift/openswap.swift
 openswap-swift/OpenswapFFI.modulemap
 openswap-swift/openswapFFI.modulemap
+openswap-ruby/openswap.rb
 openswap-ruby/libopenswap_ffi.so
+openswap-ruby/libopenswap_ffi.dylib
 openswap-python/uniffi-bindgen
 openswap-kotlin/uniffi-bindgen
 openswap-swift/uniffi-bindgen

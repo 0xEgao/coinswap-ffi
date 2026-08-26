@@ -74,6 +74,15 @@ jobs:
             libssl-dev \
             pkg-config
 
+      - name: Build FFI bindings
+        if: steps.cache-python-ffi-build.outputs.cache-hit != 'true'
+        working-directory: ./openswap-python
+        run: bash ./build-scripts/development/build-dev-linux-x86_64.sh
+
+      - name: Run network-free Python API contract tests
+        working-directory: ./openswap-python
+        run: python3 test/api_contract_test.py -v
+
       - name: Check Docker
         run: |
           docker --version
@@ -144,12 +153,6 @@ jobs:
             echo "waiting for makers ($i/60)..."; sleep 5
           done
           $ok || { echo "Timed out waiting for local makers"; exit 1; }
-
-      - name: Build FFI bindings
-        if: steps.cache-python-ffi-build.outputs.cache-hit != 'true'
-        working-directory: ./openswap-python
-        run: |
-          bash ./build-scripts/development/build-dev-linux-x86_64.sh
 
       - name: Run isolated Python swap tests
         working-directory: ./openswap-python

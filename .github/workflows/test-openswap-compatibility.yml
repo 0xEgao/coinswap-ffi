@@ -167,7 +167,8 @@ jobs:
             build-essential \
             libssl-dev \
             pkg-config \
-            protobuf-compiler
+            protobuf-compiler \
+            ruby-ffi
           corepack enable
           rustup target add \
             x86_64-unknown-linux-gnu \
@@ -342,6 +343,14 @@ jobs:
           fi
 
           if [[ "${build_status}" -eq 0 ]]; then
+            run_stage \
+              "Test Ruby binding contracts" \
+              run_in_dir "${FFI_ROOT}/openswap-ruby" \
+              env LD_LIBRARY_PATH="${FFI_ROOT}/openswap-ruby" \
+              ruby test/api_contract_test.rb || build_status=$?
+          fi
+
+          if [[ "${build_status}" -eq 0 ]]; then
             mkdir -p "${RUNNER_TEMP}/openswap-swift-bindings"
             run_stage \
               "Generate Swift bindings" \
@@ -389,9 +398,23 @@ jobs:
 
           if [[ "${build_status}" -eq 0 ]]; then
             run_stage \
+              "Test openswap-js native adapter contracts" \
+              run_in_dir "${FFI_ROOT}/openswap-js" \
+              cargo test --lib || build_status=$?
+          fi
+
+          if [[ "${build_status}" -eq 0 ]]; then
+            run_stage \
               "Build openswap-js native binding" \
               run_in_dir "${FFI_ROOT}/openswap-js" \
               yarn build || build_status=$?
+          fi
+
+          if [[ "${build_status}" -eq 0 ]]; then
+            run_stage \
+              "Test openswap-js binding contracts" \
+              run_in_dir "${FFI_ROOT}/openswap-js" \
+              yarn test || build_status=$?
           fi
 
           if [[ "${build_status}" -eq 0 ]]; then
@@ -406,6 +429,13 @@ jobs:
               "Build React Native Android bindings" \
               run_in_dir "${FFI_ROOT}/openswap-react-native" \
               npm run ubrn:android || build_status=$?
+          fi
+
+          if [[ "${build_status}" -eq 0 ]]; then
+            run_stage \
+              "Test React Native binding contracts" \
+              run_in_dir "${FFI_ROOT}/openswap-react-native" \
+              npx jest tests/jest/api.contract.test.ts --runInBand || build_status=$?
           fi
 
           if [[ "${build_status}" -eq 0 ]]; then

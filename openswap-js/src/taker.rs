@@ -102,6 +102,86 @@ impl TryFrom<SwapParams> for OpenswapSwapParams {
   }
 }
 
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn params(protocol: Option<&str>, send_amount: i64) -> SwapParams {
+    SwapParams {
+      protocol: protocol.map(str::to_owned),
+      send_amount,
+      maker_count: 2,
+      tx_count: None,
+      required_confirms: None,
+      manually_selected_outpoints: None,
+      preferred_makers: None,
+      payment_address: None,
+    }
+  }
+
+  #[test]
+  fn satoshi_amount_rejects_negative_values_and_preserves_boundaries() {
+    assert_eq!(checked_satoshi_amount(0).unwrap(), 0);
+    assert_eq!(checked_satoshi_amount(i64::MAX).unwrap(), i64::MAX as u64);
+    assert_eq!(
+      checked_satoshi_amount(-1).unwrap_err().reason,
+      "Amount must be non-negative"
+    );
+  }
+
+  #[test]
+  fn swap_params_apply_documented_defaults_and_accept_both_protocol_cases() {
+    let defaults = OpenswapSwapParams::try_from(params(None, 50_000)).unwrap();
+    assert_eq!(defaults.protocol, ProtocolVersion::Legacy);
+    assert_eq!(defaults.send_amount.to_sat(), 50_000);
+    assert_eq!(defaults.maker_count, 2);
+    assert_eq!(defaults.tx_count, 1);
+    assert_eq!(defaults.required_confirms, 1);
+
+    for value in ["Legacy", "legacy"] {
+      assert_eq!(
+        OpenswapSwapParams::try_from(params(Some(value), 1))
+          .unwrap()
+          .protocol,
+        ProtocolVersion::Legacy
+      );
+    }
+    for value in ["Taproot", "taproot"] {
+      assert_eq!(
+        OpenswapSwapParams::try_from(params(Some(value), 1))
+          .unwrap()
+          .protocol,
+        ProtocolVersion::Taproot
+      );
+    }
+  }
+
+  #[test]
+  fn swap_params_validate_user_supplied_protocol_outpoint_and_address() {
+    let protocol_error = OpenswapSwapParams::try_from(params(Some("Unified"), 1)).unwrap_err();
+    assert!(protocol_error
+      .reason
+      .starts_with("Invalid protocol: Unified"));
+
+    let mut invalid_outpoint = params(None, 1);
+    invalid_outpoint.manually_selected_outpoints = Some(vec![OutPoint {
+      txid: "not-a-txid".to_owned(),
+      vout: 0,
+    }]);
+    assert!(OpenswapSwapParams::try_from(invalid_outpoint)
+      .unwrap_err()
+      .reason
+      .starts_with("Invalid txid:"));
+
+    let mut invalid_address = params(None, 1);
+    invalid_address.payment_address = Some("not-an-address".to_owned());
+    assert!(OpenswapSwapParams::try_from(invalid_address)
+      .unwrap_err()
+      .reason
+      .starts_with("Invalid payment address:"));
+  }
+}
+
 #[napi]
 pub struct Taker {
   inner: Arc<Mutex<OpenswapTaker>>,
@@ -756,6 +836,7 @@ impl Taker {
       .map_err(|e| napi::Error::from_reason(format!("Failed to check wallet encryption: {:?}", e)))
   }
 
+  #[napi]
   pub fn verify_deniability(&self, swap_id: String) -> Result<bool> {
     let taker = self
       .inner
@@ -767,81 +848,5 @@ impl Taker {
       .map_err(|e| napi::Error::from_reason(format!("Deniability verification error: {:?}", e)))?;
 
     Ok(is_deniable)
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use super::{checked_satoshi_amount, OpenswapSwapParams, SwapParams};
-  use crate::types::{Amount, FidelityBond, LockTime, OutPoint, PublicKey};
-  use openswap::bitcoin::absolute::LockTime as csLockTime;
-
-  #[test]
-  fn negative_swap_amount_is_rejected() {
-    let params = SwapParams {
-      protocol: None,
-      send_amount: -1,
-      maker_count: 2,
-      tx_count: None,
-      required_confirms: None,
-      manually_selected_outpoints: None,
-      preferred_makers: None,
-      payment_address: None,
-    };
-
-    assert!(OpenswapSwapParams::try_from(params).is_err());
-  }
-
-  #[test]
-  fn checked_satoshi_amount_preserves_valid_values() {
-    assert!(checked_satoshi_amount(-1).is_err());
-    assert_eq!(checked_satoshi_amount(0).unwrap(), 0);
-    assert_eq!(checked_satoshi_amount(50_000).unwrap(), 50_000);
-  }
-
-  #[test]
-  fn test_locktime_conversion_basic() {
-    let block_locktime = csLockTime::from_height(500000).unwrap();
-    let napi_block = LockTime::from(block_locktime);
-
-    let time_locktime = csLockTime::from_time(1234567890).unwrap();
-    let napi_time = LockTime::from(time_locktime);
-
-    println!("From Rust -> Javascript : ");
-    println!("Block locktime: {:?} -> {:?}", block_locktime, napi_block);
-    println!("Time locktime: {:?} -> {:?}", time_locktime, napi_time);
-  }
-
-  #[test]
-  fn test_fidelity_bond_creation() {
-    // Create a mock fidelity bond to see the structure
-    let bond = FidelityBond {
-      outpoint: OutPoint {
-        txid: "abc123def456789".to_string(),
-        vout: 0,
-      },
-      amount: Amount { sats: 100000 },
-      lock_time: LockTime {
-        lock_type: "Blocks".to_string(),
-        value: 750000,
-      },
-      pubkey: PublicKey {
-        compressed: true,
-        inner: vec![2, 123, 45, 67, 89],
-      },
-      conf_height: Some(500000),
-      cert_expiry: Some(144),
-      is_spent: false,
-    };
-
-    println!("FidelityBond structure:");
-    println!("  outpoint: {}:{}", bond.outpoint.txid, bond.outpoint.vout);
-    println!("  amount: {} sats", bond.amount.sats);
-    println!("  lock_time: {:?}", bond.lock_time);
-    println!("  pubkey compressed: {}", bond.pubkey.compressed);
-    println!("  pubkey bytes: {:?}", bond.pubkey.inner);
-    println!("  conf_height: {:?}", bond.conf_height);
-    println!("  cert_expiry: {:?}", bond.cert_expiry);
-    println!("  is_spent: {}", bond.is_spent);
   }
 }

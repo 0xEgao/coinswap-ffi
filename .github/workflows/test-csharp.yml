@@ -107,6 +107,13 @@ jobs:
           uniffi-bindgen-cs --library "$LIB" --config uniffi.toml \
             --out-dir ../openswap-csharp/Openswap/Generated --no-format
 
+      - name: Run network-free C# API contract tests
+        working-directory: openswap-csharp
+        run: |
+          dotnet test Openswap.Tests/Openswap.Tests.csproj \
+            -c Release \
+            --filter "FullyQualifiedName~Openswap.Tests.ApiContractTest"
+
       - name: Check Docker
         run: |
           docker --version
@@ -173,7 +180,6 @@ jobs:
           # block on its background services. Run each live swap in a fresh
           # testhost so completed takers cannot accumulate Tor connections and
           # starve a later case with EAGAIN (os error 11).
-          dotnet build Openswap.Tests/Openswap.Tests.csproj -c Release
           for test_case in LegacyRpc TaprootRpc LegacyElectrum TaprootElectrum; do
             echo "Running C# swap test: ${test_case}"
             timeout --signal=TERM 10m \
