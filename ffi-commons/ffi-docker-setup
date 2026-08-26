@@ -24,6 +24,8 @@ BITCOIN_ZMQ_PORT="28332"
 ELECTRUM_PORT="50001"
 TOR_SOCKS_PORT="9050"
 TOR_CONTROL_PORT="9051"
+MAKER_STARTUP_TIMEOUT_SECONDS="${MAKER_STARTUP_TIMEOUT_SECONDS:-120}"
+MAKER_RESTART_LIMIT="${MAKER_RESTART_LIMIT:-3}"
 
 # RPC maker (Bitcoin Core backend) and Electrum maker (electrs backend).
 RPC_MAKERS=("makerd1")
@@ -198,6 +200,61 @@ show_logs() {
     fi
 }
 
+print_maker_startup_diagnostics() {
+    local container_name="$1"
+
+    print_error "${container_name} did not reach the wallet-funding stage."
+    print_info "Container state:"
+    docker inspect \
+        --format 'status={{.State.Status}} exit_code={{.State.ExitCode}} restarts={{.RestartCount}} error={{.State.Error}}' \
+        "$container_name" 2>&1 || true
+    print_info "Recent ${container_name} logs:"
+    docker logs --tail 200 "$container_name" 2>&1 || true
+    print_info "Stack status:"
+    docker compose -f "$COMPOSE_FILE" ps -a 2>&1 || true
+}
+
+wait_for_maker_funding_address() {
+    local container_name="$1"
+    local elapsed=0
+    local maker_logs
+    local container_status
+    local restart_count
+
+    MAKER_FUNDING_ADDRESS=""
+    print_info "Waiting for ${container_name} to request wallet funding..."
+
+    while [ "$elapsed" -lt "$MAKER_STARTUP_TIMEOUT_SECONDS" ]; do
+        maker_logs=$(docker logs "$container_name" 2>&1 || true)
+        MAKER_FUNDING_ADDRESS=$(printf '%s\n' "$maker_logs" \
+            | grep "Send at least" \
+            | tail -1 \
+            | grep -Eo 'bcrt1[[:alnum:]]+' || true)
+
+        if [ -n "$MAKER_FUNDING_ADDRESS" ]; then
+            return 0
+        fi
+
+        container_status=$(docker inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null || true)
+        restart_count=$(docker inspect --format '{{.RestartCount}}' "$container_name" 2>/dev/null || true)
+
+        if [ -z "$container_status" ] \
+            || [ "$container_status" = "exited" ] \
+            || [ "$container_status" = "dead" ] \
+            || { [ "${restart_count:-0}" -ge "$MAKER_RESTART_LIMIT" ] 2>/dev/null; }; then
+            print_maker_startup_diagnostics "$container_name"
+            return 1
+        fi
+
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+
+    print_error "Timed out after ${MAKER_STARTUP_TIMEOUT_SECONDS}s waiting for ${container_name}."
+    print_maker_startup_diagnostics "$container_name"
+    return 1
+}
+
 fund_makers() {
     print_info "Funding makers with Bitcoin (regtest)..."
 
@@ -208,9 +265,6 @@ fund_makers() {
     local addr=$(docker exec openswap-bitcoind bitcoin-cli -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password -rpcwallet=test getnewaddress)
     docker exec openswap-bitcoind bitcoin-cli -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password generatetoaddress 101 "$addr"
 
-    print_info "Waiting for makers to start..."
-    sleep 15
-
     local total_rounds=${#ALL_MAKERS[@]}
     local current_round=0
 
@@ -220,16 +274,16 @@ fund_makers() {
         local container_name="openswap-${maker_name}"
         print_info "Funding ${maker_name}..."
         local maker_addr
-        maker_addr=$(docker logs "$container_name" 2>&1 | grep "Send at least" | tail -1 | grep -Eo 'bcrt1[[:alnum:]]+')
-        if [ -n "$maker_addr" ]; then
-            print_info "${maker_name} address: $maker_addr"
-            for _ in 1 2 3 4; do
-                docker exec openswap-bitcoind bitcoin-cli -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password -rpcwallet=test sendtoaddress "$maker_addr" 0.25
-            done
-            print_success "Sent 4x 0.25 BTC (1 BTC total) to ${maker_name}"
-        else
-            print_warning "Could not find ${maker_name} address."
+        if ! wait_for_maker_funding_address "$container_name"; then
+            return 1
         fi
+        maker_addr="$MAKER_FUNDING_ADDRESS"
+
+        print_info "${maker_name} address: $maker_addr"
+        for _ in 1 2 3 4; do
+            docker exec openswap-bitcoind bitcoin-cli -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password -rpcwallet=test sendtoaddress "$maker_addr" 0.25
+        done
+        print_success "Sent 4x 0.25 BTC (1 BTC total) to ${maker_name}"
 
         # Pause between rounds so maker funding has a predictable cadence.
         if [ "$current_round" -lt "$total_rounds" ]; then

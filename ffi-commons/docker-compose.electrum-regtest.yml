@@ -92,7 +92,7 @@ services:
       sh -c 'sleep 1 &&
       mkdir -p /home/openswap/.openswap/maker &&
       printf "%s\n" "network_port = 16102" "rpc_port = 6102" "socks_port = 9050" "control_port = 9051" "tor_auth_password = openswap" "min_swap_amount = 10000" "fidelity_amount = 50000" "fidelity_timelock = 13104" > /home/openswap/.openswap/maker/config.toml &&
-      makerd -r bitcoind:18442 -z tcp://bitcoind:28332 -a user:password -w makerd1-wallet'
+      makerd -r bitcoind:18442 -z tcp://bitcoind:28332 -a user:password -w makerd1-wallet -p ffi-regtest-wallet-password'
     environment:
       - RUST_LOG=info
     restart: unless-stopped
@@ -112,7 +112,7 @@ services:
       sh -c 'sleep 2 &&
       mkdir -p /home/openswap/.openswap/maker &&
       printf "%s\n" "network_port = 16103" "rpc_port = 6103" "socks_port = 9050" "control_port = 9051" "tor_auth_password = openswap" "min_swap_amount = 10000" "fidelity_amount = 50000" "fidelity_timelock = 13104" > /home/openswap/.openswap/maker/config.toml &&
-      makerd --electrum tcp://electrs:50001 -w makerd2-wallet'
+      makerd --electrum tcp://electrs:50001 -w makerd2-wallet -p ffi-regtest-wallet-password'
     environment:
       - RUST_LOG=info
     restart: unless-stopped

@@ -23,6 +23,7 @@ MAKER_COUNT = 2
 MAKER_READY_ATTEMPTS = 3
 MAKER_READY_RETRY_SECS = 10
 MAKER_CONTAINERS = ("openswap-makerd1", "openswap-makerd2")
+WALLET_PASSWORD = "ffi-live-test-wallet-password"
 # Retain the native handle until os._exit bypasses its blocking upstream
 # destructor at the end of this dedicated live-test process.
 LIVE_TEST_TAKERS = []
@@ -165,7 +166,7 @@ def run_swap(name, data_dir, backend, protocol, addr_type):
         control_port=9051,
         tor_auth_password="openswap",
         zmq_addr="tcp://localhost:28332",
-        password="",
+        password=WALLET_PASSWORD,
         # Every CI job has its own regtest chain. Public discovery can return
         # makers from unrelated jobs, so poll this stack's onion addresses.
         nostr_relays=[],

@@ -24,6 +24,7 @@ pub const BITCOIN_RPC_USER: &str = "user";
 pub const BITCOIN_RPC_PASS: &str = "password";
 pub const BITCOIN_ZMQ: &str = "tcp://127.0.0.1:28332";
 pub const ELECTRUM_URL: &str = "tcp://localhost:50001";
+pub const WALLET_PASSWORD: &str = "ffi-live-test-wallet-password";
 pub const BITCOIND_CONTAINER: &str = "openswap-bitcoind";
 pub const MAKER_CONTAINERS: &[&str] = &["openswap-makerd1", "openswap-makerd2"];
 const MAKER_COUNT: usize = 2;
@@ -151,7 +152,7 @@ fn init_taker(swap: &Swap) -> Arc<Taker> {
         Some(9051),
         Some("openswap".into()),
         BITCOIN_ZMQ.into(),
-        None,
+        Some(WALLET_PASSWORD.into()),
         // Each CI job owns an isolated regtest chain. Public discovery can
         // return makers announced by unrelated concurrent jobs.
         Some(Vec::new()),

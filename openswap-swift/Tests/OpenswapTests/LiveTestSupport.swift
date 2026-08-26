@@ -22,7 +22,7 @@ struct LiveTestConfig {
         self.zmqAddr = "tcp://127.0.0.1:28332"
         self.walletName = walletName
         self.dataDir = nil
-        self.walletPassword = nil
+        self.walletPassword = "ffi-live-test-wallet-password"
         self.torControlPort = 9051
         self.torAuthPassword = "openswap"
         self.bitcoinNetwork = "regtest"

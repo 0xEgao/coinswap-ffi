@@ -18,6 +18,7 @@ require 'openswap'
 
 # Amount swapped by each taker, in sats. The taker is funded with 4x this.
 SWAP_AMOUNT = 500_000
+WALLET_PASSWORD = 'ffi-live-test-wallet-password'
 
 # (name, backend, protocol, addr_type)
 SWAPS = [
@@ -97,7 +98,7 @@ def run_swap(name, backend, protocol, addr_type)
     9051,                      # Tor control port
     'openswap',                # Tor control password
     'tcp://127.0.0.1:28332',   # Bitcoin Core ZMQ endpoint
-    '',                        # optional wallet encryption password
+    WALLET_PASSWORD,           # wallet encryption password
     nil,                       # nostr relays (nil keeps defaults)
     backend_config             # backend selection (nil for rpc)
   )

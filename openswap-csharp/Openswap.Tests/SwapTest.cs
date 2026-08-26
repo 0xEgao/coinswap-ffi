@@ -22,6 +22,7 @@ public class SwapTest
     private const string RpcPassword = "password";
     private const string ZmqAddr = "tcp://localhost:28332";
     private const string ElectrumUrl = "tcp://localhost:50001";
+    private const string WalletPassword = "ffi-live-test-wallet-password";
     private const ushort ControlPort = 9051;
     private static readonly string[] MakerContainers = ["openswap-makerd1", "openswap-makerd2"];
 
@@ -100,7 +101,7 @@ public class SwapTest
             ControlPort,
             "openswap",
             ZmqAddr,
-            "",
+            WalletPassword,
             // Each CI job owns an isolated regtest chain. Avoid public discovery,
             // which may return makers announced by unrelated concurrent jobs.
             Array.Empty<string>(),
