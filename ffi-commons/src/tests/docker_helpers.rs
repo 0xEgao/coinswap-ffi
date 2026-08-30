@@ -120,7 +120,7 @@ pub fn cleanup_wallet(wallet: &str) {
 fn init_taker(swap: &Swap) -> Arc<Taker> {
     let (rpc_config, backend_config) = match swap.backend {
         Backend::Rpc => (
-            Some(crate::types::RPCConfig {
+            Some(crate::types::RpcConfig {
                 url: "localhost:18442".into(),
                 username: BITCOIN_RPC_USER.into(),
                 password: BITCOIN_RPC_PASS.into(),

@@ -7,7 +7,7 @@ use crate::{
     types::{
         Address, Amount, BackendConfig, Balances, GetTransactionResultDetail,
         ListTransactionResult, ListUnspentResultEntry, MakerOfferCandidate, Offer, OfferBook,
-        OutPoint, RPCConfig, ScriptBuf, SignedAmountSats, SwapReport, TakerError, TotalUtxoInfo,
+        OutPoint, RpcConfig, ScriptBuf, SignedAmountSats, SwapReport, TakerError, TotalUtxoInfo,
         Txid, UtxoSpendInfo, WalletTxInfo,
     },
 };
@@ -171,12 +171,12 @@ impl Taker {
     ///   - `Some(value)`: Attempt to load a wallet file named `value`. If it does not exist,
     ///     a new wallet with the given name will be created.
     ///   - `None`: Create a new wallet file with the default name `taker-wallet`.
-    /// - If `rpc_config` = `None`: Use the default [`RPCConfig`]
+    /// - If `rpc_config` = `None`: Use the default [`RpcConfig`]
     #[allow(clippy::too_many_arguments)]
     pub fn init(
         data_dir: Option<String>,
         wallet_file_name: Option<String>,
-        rpc_config: Option<RPCConfig>,
+        rpc_config: Option<RpcConfig>,
         // _behavior: Option<TakerBehavior>,
         control_port: Option<u16>,
         tor_auth_password: Option<String>,

@@ -1,0 +1,116 @@
+name: JavaScript Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "openswap-js/**"
+      - "ffi-commons/**"
+      - ".github/workflows/test-javascript.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "openswap-js/**"
+      - "ffi-commons/**"
+      - ".github/workflows/test-javascript.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test-javascript:
+    name: Test JavaScript Bindings
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            openswap-js/target/
+          key: ${{ runner.os }}-cargo-javascript-${{ hashFiles('openswap-js/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-javascript-
+            ${{ runner.os }}-cargo-
+
+      - name: Install system and JavaScript dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev pkg-config
+          corepack enable
+          cd openswap-js
+          yarn install --no-immutable
+
+      - name: Build and test JavaScript binding contracts
+        working-directory: ./openswap-js
+        run: |
+          yarn build
+          yarn test
+
+      - name: Set up Docker environment
+        working-directory: ./ffi-commons
+        run: |
+          chmod +x ffi-docker-setup
+          if docker pull openswap/bitcoin-mutinynet:latest && docker pull openswap/openswap:master; then
+            echo "Using prebuilt Docker images"
+          else
+            echo "Prebuilt image pull failed; falling back to local image build"
+            ./ffi-docker-setup setup
+          fi
+          ./ffi-docker-setup start
+          ./ffi-docker-setup wait-ready
+
+      - name: Run isolated JavaScript live swap tests
+        working-directory: ./openswap-js
+        timeout-minutes: 40
+        run: |
+          set -euo pipefail
+          for test_case in legacy_rpc taproot_rpc legacy_electrum taproot_electrum; do
+            echo "Running JavaScript swap test: ${test_case}"
+            timeout --signal=TERM --kill-after=30s 10m \
+              env OPENSWAP_LIVE_TESTS=1 OPENSWAP_SWAP_CASE="${test_case}" \
+              yarn test __test__/swap.spec.ts --timeout=10m
+          done
+
+      - name: Collect failure logs
+        if: failure()
+        working-directory: ./ffi-commons
+        run: docker compose -f docker-compose.electrum-regtest.yml logs --no-color > "${RUNNER_TEMP}/javascript-docker.log" 2>&1 || true
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: javascript-integration-logs
+          path: |
+            ${{ runner.temp }}/javascript-docker.log
+            ~/.openswap/taker/**/debug.log
+            ffi-commons/.block-mining.log
+          retention-days: 7
+
+      - name: Clean up Docker environment
+        if: always()
+        working-directory: ./ffi-commons
+        run: ./ffi-docker-setup stop || true

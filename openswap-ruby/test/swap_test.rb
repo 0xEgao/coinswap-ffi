@@ -9,6 +9,7 @@
 # rpc/electrum. Each taker funds a fresh wallet and runs a 2-maker openswap.
 
 require 'fileutils'
+require 'open3'
 
 # Add parent directory to load path for the openswap module
 lib_path = File.expand_path('..', __dir__)
@@ -18,6 +19,10 @@ require 'openswap'
 
 # Amount swapped by each taker, in sats. The taker is funded with 4x this.
 SWAP_AMOUNT = 500_000
+MAKER_COUNT = 2
+MAKER_READY_ATTEMPTS = 3
+MAKER_READY_RETRY_SECONDS = 10
+MAKER_CONTAINERS = %w[openswap-makerd1 openswap-makerd2].freeze
 WALLET_PASSWORD = 'ffi-live-test-wallet-password'
 
 # (name, backend, protocol, addr_type)
@@ -28,20 +33,8 @@ SWAPS = [
   ['taproot_electrum', 'electrum', 'Taproot', 'P2TR']
 ].freeze
 
-def cleanup_wallet(wallet_name)
-  wallets_dir = File.expand_path('~/.openswap/taker/wallets')
-  if Dir.exist?(wallets_dir)
-    Dir.children(wallets_dir).each do |entry|
-      next unless entry.start_with?(wallet_name)
-
-      wallet_path = File.join(wallets_dir, entry)
-      begin
-        FileUtils.rm_rf(wallet_path)
-      rescue StandardError => e
-        puts "Warning: Could not clean #{wallet_path}: #{e.message}"
-      end
-    end
-  end
+def cleanup_wallet(wallet_name, data_dir)
+  FileUtils.rm_rf(data_dir)
 
   begin
     system('docker', 'exec', 'openswap-bitcoind', 'bitcoin-cli', '-regtest',
@@ -54,8 +47,29 @@ def cleanup_wallet(wallet_name)
 end
 
 def fund(address)
-  result = `docker exec openswap-bitcoind bitcoin-cli -regtest -rpcport=18442 -rpcwallet=test -rpcuser=user -rpcpassword=password sendtoaddress #{address} 0.25 2>&1`
-  raise "Could not send BTC to #{address}: #{result}" unless $?.success?
+  stdout, stderr, status = Open3.capture3(
+    'docker', 'exec', 'openswap-bitcoind', 'bitcoin-cli',
+    '-regtest', '-rpcport=18442', '-rpcwallet=test',
+    '-rpcuser=user', '-rpcpassword=password',
+    'sendtoaddress', address, '0.25'
+  )
+  return if status.success?
+
+  raise "Could not send BTC to #{address}: #{stdout}#{stderr}"
+end
+
+def local_maker_addresses
+  marker = 'Generated new Tor Hidden Service Hostname:'
+
+  MAKER_CONTAINERS.map do |container|
+    stdout, stderr, status = Open3.capture3('docker', 'logs', container)
+    raise "#{container}: failed to read maker logs: #{stderr}" unless status.success?
+
+    matches = "#{stdout}\n#{stderr}".lines.filter_map do |line|
+      line.split(marker, 2)[1]&.strip&.split&.first if line.include?(marker)
+    end
+    matches.last || raise("#{container}: maker onion address not found in logs")
+  end
 end
 
 def wait_for_spendable(taker, target)
@@ -70,9 +84,50 @@ def wait_for_spendable(taker, target)
   taker.get_balances
 end
 
+def suitable_makers(offerbook, protocol)
+  offerbook.makers.select do |maker|
+    maker.state.state_type == 'Good' &&
+      !maker.protocol.nil? && [protocol, 'Unified'].include?(maker.protocol.protocol_type) &&
+      !maker.offer.nil? && maker.offer.min_size <= SWAP_AMOUNT && SWAP_AMOUNT <= maker.offer.max_size
+  end
+end
+
+def wait_for_suitable_makers(taker, name, protocol, maker_addresses)
+  offerbook = nil
+
+  1.upto(MAKER_READY_ATTEMPTS) do |attempt|
+    maker_addresses.each do |address|
+      puts "  polling local maker #{address}"
+      taker.poll_maker(address)
+    rescue StandardError => e
+      puts "  poll failed for #{address}: #{e.message}"
+    end
+
+    offerbook = taker.fetch_offers
+    suitable = suitable_makers(offerbook, protocol)
+    puts "#{name}: offerbook attempt #{attempt}/#{MAKER_READY_ATTEMPTS}: " \
+         "#{offerbook.makers.length} total, #{suitable.length} suitable #{protocol} makers"
+    offerbook.makers.each do |maker|
+      maker_protocol = maker.protocol&.protocol_type || 'None'
+      amount_range = maker.offer ? "#{maker.offer.min_size}..#{maker.offer.max_size} sats" : 'no offer'
+      puts "  #{maker.address.address}: state=#{maker.state.state_type}, " \
+           "protocol=#{maker_protocol}, amount=#{amount_range}"
+    end
+    STDOUT.flush
+
+    return if suitable.length >= MAKER_COUNT
+    sleep(MAKER_READY_RETRY_SECONDS) if attempt < MAKER_READY_ATTEMPTS
+  end
+
+  count = offerbook.nil? ? 0 : suitable_makers(offerbook, protocol).length
+  raise "#{name}: expected #{MAKER_COUNT} suitable #{protocol} makers for " \
+        "#{SWAP_AMOUNT} sats, found #{count}"
+end
+
 def run_swap(name, backend, protocol, addr_type)
   puts "\n=== #{name} (#{backend} / #{protocol} / #{addr_type}) ==="
-  cleanup_wallet(name)
+  data_dir = File.expand_path("~/.openswap/taker/#{name}")
+  cleanup_wallet(name, data_dir)
 
   rpc_config =
     if backend == 'rpc'
@@ -86,10 +141,14 @@ def run_swap(name, backend, protocol, addr_type)
 
   backend_config =
     if backend == 'electrum'
-      Openswap::BackendConfig.new(kind: 'electrum', url: 'tcp://localhost:50001')
+      Openswap::BackendConfig.new(
+        kind: 'electrum', url: 'tcp://localhost:50001',
+        username: nil, password: nil, wallet_name: nil, zmq_addr: nil,
+        socks5: nil, timeout: nil, poll_interval_secs: nil, max_retries: nil
+      )
     end
 
-  data_dir = File.expand_path("~/.openswap/taker/#{name}")
+  maker_addresses = local_maker_addresses
 
   taker = Openswap::Taker.init(
     data_dir,                  # taker data directory
@@ -99,11 +158,11 @@ def run_swap(name, backend, protocol, addr_type)
     'openswap',                # Tor control password
     'tcp://127.0.0.1:28332',   # Bitcoin Core ZMQ endpoint
     WALLET_PASSWORD,           # wallet encryption password
-    nil,                       # nostr relays (nil keeps defaults)
+    [],                        # poll only this CI job's local makers
     backend_config             # backend selection (nil for rpc)
   )
 
-  taker.sync_offerbook_and_wait
+  wait_for_suitable_makers(taker, name, protocol, maker_addresses)
 
   # Fund with 0.25 BTC across 4 fresh external addresses (1.0 BTC total).
   4.times do
@@ -124,7 +183,7 @@ def run_swap(name, backend, protocol, addr_type)
     tx_count: 1,
     required_confirms: 1,
     manually_selected_outpoints: nil,
-    preferred_makers: nil,
+    preferred_makers: maker_addresses,
     payment_address: nil
   )
   swap_id = taker.prepare_openswap(swap_params)
@@ -138,14 +197,22 @@ def run_swap(name, backend, protocol, addr_type)
 end
 
 def main
-  SWAPS.each do |name, backend, protocol, addr_type|
-    run_swap(name, backend, protocol, addr_type)
+  requested = ARGV.fetch(0) do
+    raise "swap case is required; expected one of: #{SWAPS.map(&:first).join(', ')}"
   end
-  puts "\n✓ all 4 takers (legacy/taproot × rpc/electrum) completed 2-maker swaps"
+  swap = SWAPS.find { |name,| name == requested }
+  raise "unknown swap case #{requested.inspect}; expected one of: #{SWAPS.map(&:first).join(', ')}" if swap.nil?
+
+  run_swap(*swap)
+  puts "\n✓ #{requested} completed a 2-maker swap"
+  STDOUT.flush
+  exit!(0)
 rescue StandardError => e
   puts "\n✗ Error: #{e.class.name}: #{e.message}"
   puts e.backtrace.join("\n")
-  exit(1)
+  STDOUT.flush
+  STDERR.flush
+  exit!(1)
 end
 
 main if __FILE__ == $PROGRAM_NAME

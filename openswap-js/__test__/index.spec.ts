@@ -1,7 +1,10 @@
 import test from 'ava'
 import * as nativeBinding from '../index'
 
-const binding = nativeBinding as unknown as Record<string, unknown>
+const importedBinding = nativeBinding as unknown as Record<string, unknown>
+// Node exposes CommonJS modules through an ESM namespace with an interop-only
+// `default` key. Assert against the native module itself, not that wrapper.
+const binding = (importedBinding.default ?? importedBinding) as Record<string, unknown>
 
 test('native module exports the complete runtime surface', (t) => {
   t.deepEqual(Object.keys(binding).sort(), ['AddressType', 'Taker', 'TakerBehavior', 'TakerError'])
