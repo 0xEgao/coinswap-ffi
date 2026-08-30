@@ -14,6 +14,7 @@ const describeLive = liveTestsEnabled ? describe : describe.skip
 
 // Sats swapped per taker; funded with 4x this (1.0 BTC across 4 addresses).
 const SWAP_AMOUNT = 500_000n
+const WALLET_PASSWORD = 'ffi-live-test-wallet-password'
 
 type Backend = 'rpc' | 'electrum'
 
@@ -45,7 +46,7 @@ async function runSwap({ name, backend, protocol, addressType, wallet }: SwapCas
     controlPort: 9051,
     torAuthPassword: 'openswap',
     zmqAddr: 'tcp://127.0.0.1:28332',
-    password: '',
+    password: WALLET_PASSWORD,
     nostrRelays: null,
     backendConfig: backend === 'electrum' ? electrumBackendConfig() : null,
   })

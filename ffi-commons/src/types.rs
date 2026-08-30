@@ -171,11 +171,16 @@ pub enum TakerError {
 impl From<OpenswapTakerError> for TakerError {
     fn from(error: OpenswapTakerError) -> Self {
         match error {
-            OpenswapTakerError::Wallet(e) => TakerError::Wallet {
-                msg: format!("{:?}", e),
+            OpenswapTakerError::Wallet(error) => TakerError::Wallet {
+                msg: error.to_string(),
             },
             OpenswapTakerError::General(msg) => TakerError::General { msg },
-            OpenswapTakerError::IO(e) => TakerError::IO { msg: e.to_string() },
+            OpenswapTakerError::IO(error) => TakerError::IO {
+                msg: error.to_string(),
+            },
+            OpenswapTakerError::Net(error) => TakerError::Network {
+                msg: error.to_string(),
+            },
             _ => TakerError::General {
                 msg: format!("Taker error: {:?}", error),
             },
@@ -185,7 +190,7 @@ impl From<OpenswapTakerError> for TakerError {
 
 /// Represents different behaviors taker can have during the swap.
 /// Used for testing various possible scenarios that can happen during a swap.
-#[derive(uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum TakerBehavior {
     /// Normal behaviour
     Normal,
@@ -546,7 +551,7 @@ impl From<csMakerState> for MakerState {
 /// Protocol which maker follows
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct MakerProtocol {
-    /// Protocol type: "Legacy" or "Taproot"
+    /// Maker capability: "Legacy", "Taproot", or "Unified".
     pub protocol_type: String,
 }
 
@@ -580,7 +585,10 @@ impl TryFrom<AddressType> for csAddressType {
             "P2TR" => Ok(csAddressType::P2TR),
             "P2WPKH" => Ok(csAddressType::P2WPKH),
             _ => Err(TakerError::General {
-                msg: format!("Invalid address type: {}", addr.addr_type),
+                msg: format!(
+                    "Invalid address type: {} (expected P2WPKH or P2TR)",
+                    addr.addr_type
+                ),
             }),
         }
     }
@@ -855,8 +863,8 @@ pub fn restore_wallet_gui_app(
 pub fn is_wallet_encrypted(wallet_path: String) -> Result<bool, TakerError> {
     let path = PathBuf::from(wallet_path);
 
-    openswap::wallet::Wallet::is_wallet_encrypted(&path).map_err(|e| TakerError::Wallet {
-        msg: format!("Failed to check wallet encryption: {:?}", e),
+    openswap::wallet::Wallet::is_wallet_encrypted(&path).map_err(|error| TakerError::Wallet {
+        msg: format!("Failed to check wallet encryption: {error}"),
     })
 }
 
@@ -894,4 +902,293 @@ pub fn setup_logging(
     };
     openswap::utill::setup_taker_logger(level, to_stdout, path);
     Ok(())
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use openswap::{
+        bitcoin::{
+            Amount as OpenswapAmount, ScriptBuf as OpenswapScriptBuf,
+            SignedAmount as OpenswapSignedAmount, Txid as OpenswapTxid,
+            absolute::{Height, LockTime as OpenswapLockTime, Time},
+        },
+        error::NetError,
+        taker::error::TakerError as OpenswapTakerError,
+        taker::offers::{MakerProtocol as OpenswapMakerProtocol, MakerState as OpenswapMakerState},
+        wallet::{
+            AddressType as OpenswapAddressType, BackendConfig as OpenswapBackendConfig,
+            WalletError as OpenswapWalletError,
+        },
+    };
+    use std::str::FromStr;
+
+    fn backend_config(kind: &str) -> BackendConfig {
+        BackendConfig {
+            kind: kind.to_string(),
+            url: None,
+            username: None,
+            password: None,
+            wallet_name: None,
+            zmq_addr: None,
+            socks5: None,
+            timeout: None,
+            poll_interval_secs: None,
+            max_retries: None,
+        }
+    }
+
+    fn general_message(error: TakerError) -> String {
+        match error {
+            TakerError::General { msg } => msg,
+            other => panic!("expected General error, got {other}"),
+        }
+    }
+
+    #[test]
+    fn default_rpc_config_is_stable_and_each_call_returns_independent_data() {
+        let mut first = create_default_rpc_config();
+        let second = create_default_rpc_config();
+
+        assert_eq!(first.url, "http://127.0.0.1:38332");
+        assert_eq!(first.username, "user");
+        assert_eq!(first.password, "password");
+        assert_eq!(first.wallet_name, "openswap_wallet");
+
+        first.wallet_name.push_str("-changed");
+        assert_eq!(second.wallet_name, "openswap_wallet");
+    }
+
+    #[test]
+    fn rpc_backend_accepts_case_insensitive_kind_and_preserves_overrides() {
+        let converted = OpenswapBackendConfig::try_from(BackendConfig {
+            kind: "RPC".to_string(),
+            url: Some("http://node.internal:18443".to_string()),
+            username: Some("alice".to_string()),
+            password: Some("secret".to_string()),
+            wallet_name: Some("wallet-a".to_string()),
+            zmq_addr: Some("tcp://node.internal:28332".to_string()),
+            socks5: Some("ignored".to_string()),
+            timeout: Some(9),
+            poll_interval_secs: Some(10),
+            max_retries: Some(11),
+        })
+        .unwrap();
+
+        let OpenswapBackendConfig::CoreRpc(config) = converted else {
+            panic!("RPC kind must select the Core RPC backend");
+        };
+        assert_eq!(config.url, "http://node.internal:18443");
+        assert_eq!(config.wallet_name, "wallet-a");
+        assert_eq!(config.zmq_addr, "tcp://node.internal:28332");
+        match config.auth {
+            Auth::UserPass(username, password) => {
+                assert_eq!(username, "alice");
+                assert_eq!(password, "secret");
+            }
+            other => panic!("expected username/password authentication, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rpc_backend_requires_username_and_password_as_a_pair() {
+        for (username, password) in [(Some("user"), None), (None, Some("password"))] {
+            let mut config = backend_config("rpc");
+            config.username = username.map(str::to_string);
+            config.password = password.map(str::to_string);
+            assert_eq!(
+                general_message(OpenswapBackendConfig::try_from(config).unwrap_err()),
+                "RPC backend requires username and password together"
+            );
+        }
+    }
+
+    #[test]
+    fn electrum_backend_requires_url_and_preserves_transport_options() {
+        assert_eq!(
+            general_message(
+                OpenswapBackendConfig::try_from(backend_config("electrum")).unwrap_err()
+            ),
+            "Electrum backend requires url"
+        );
+
+        let converted = OpenswapBackendConfig::try_from(BackendConfig {
+            kind: "ElEcTrUm".to_string(),
+            url: Some("ssl://electrum.example:50002".to_string()),
+            username: Some("ignored".to_string()),
+            password: Some("ignored".to_string()),
+            wallet_name: Some("ignored".to_string()),
+            zmq_addr: Some("ignored".to_string()),
+            socks5: Some("127.0.0.1:9050".to_string()),
+            timeout: Some(120),
+            poll_interval_secs: Some(15),
+            max_retries: Some(8),
+        })
+        .unwrap();
+
+        let OpenswapBackendConfig::Electrum(config) = converted else {
+            panic!("Electrum kind must select the Electrum backend");
+        };
+        assert_eq!(config.url, "ssl://electrum.example:50002");
+        assert_eq!(config.socks5.as_deref(), Some("127.0.0.1:9050"));
+        assert_eq!(config.timeout, Some(120));
+        assert_eq!(config.poll_interval_secs, Some(15));
+        assert_eq!(config.max_retries, 8);
+    }
+
+    #[test]
+    fn backend_kind_rejects_unknown_values_with_the_normalized_value() {
+        assert_eq!(
+            general_message(
+                OpenswapBackendConfig::try_from(backend_config("Unknown")).unwrap_err()
+            ),
+            "Invalid backend kind: unknown (expected rpc or electrum)"
+        );
+    }
+
+    #[test]
+    fn address_type_domain_is_exact_and_case_sensitive() {
+        assert!(matches!(
+            OpenswapAddressType::try_from(AddressType {
+                addr_type: "P2WPKH".to_string()
+            }),
+            Ok(OpenswapAddressType::P2WPKH)
+        ));
+        assert!(matches!(
+            OpenswapAddressType::try_from(AddressType {
+                addr_type: "P2TR".to_string()
+            }),
+            Ok(OpenswapAddressType::P2TR)
+        ));
+        assert_eq!(
+            general_message(
+                OpenswapAddressType::try_from(AddressType {
+                    addr_type: "p2tr".to_string()
+                })
+                .unwrap_err()
+            ),
+            "Invalid address type: p2tr (expected P2WPKH or P2TR)"
+        );
+    }
+
+    #[test]
+    fn maker_state_and_protocol_variants_keep_their_ffi_discriminants() {
+        let good = MakerState::from(OpenswapMakerState::Good);
+        assert_eq!(good.state_type, "Good");
+        assert_eq!(good.retries, None);
+
+        let unresponsive = MakerState::from(OpenswapMakerState::Unresponsive { retries: 7 });
+        assert_eq!(unresponsive.state_type, "Unresponsive");
+        assert_eq!(unresponsive.retries, Some(7));
+
+        let bad = MakerState::from(OpenswapMakerState::Bad);
+        assert_eq!(bad.state_type, "Bad");
+        assert_eq!(bad.retries, None);
+
+        for (input, expected) in [
+            (OpenswapMakerProtocol::Legacy, "Legacy"),
+            (OpenswapMakerProtocol::Taproot, "Taproot"),
+            (OpenswapMakerProtocol::Unified, "Unified"),
+        ] {
+            assert_eq!(MakerProtocol::from(input).protocol_type, expected);
+        }
+    }
+
+    #[test]
+    fn primitive_bitcoin_values_cross_the_contract_without_reformatting() {
+        assert_eq!(
+            Amount::from(OpenswapAmount::from_sat(21_000_000)).sats,
+            21_000_000
+        );
+        assert_eq!(
+            SignedAmountSats::from(OpenswapSignedAmount::from_sat(-42)).sats,
+            -42
+        );
+
+        let script = OpenswapScriptBuf::from_bytes(vec![0x00, 0x51, 0xff]);
+        assert_eq!(ScriptBuf::from(script).hex, "0051ff");
+
+        let txid = OpenswapTxid::from_str(&"ab".repeat(32)).unwrap();
+        assert_eq!(Txid::from(txid).value, "ab".repeat(32));
+    }
+
+    #[test]
+    fn lock_time_conversion_distinguishes_block_height_from_timestamp() {
+        let blocks = LockTime::from(OpenswapLockTime::Blocks(
+            Height::from_consensus(144).unwrap(),
+        ));
+        assert_eq!(blocks.lock_type, "Blocks");
+        assert_eq!(blocks.value, 144);
+
+        let seconds = LockTime::from(OpenswapLockTime::Seconds(
+            Time::from_consensus(500_000_000).unwrap(),
+        ));
+        assert_eq!(seconds.lock_type, "Seconds");
+        assert_eq!(seconds.value, 500_000_000);
+    }
+
+    #[test]
+    fn taker_error_variants_preserve_their_category_and_message() {
+        let errors = [
+            (
+                TakerError::Wallet {
+                    msg: "wallet".into(),
+                },
+                "Wallet error: wallet",
+            ),
+            (
+                TakerError::Protocol {
+                    msg: "protocol".into(),
+                },
+                "Protocol error: protocol",
+            ),
+            (
+                TakerError::Network {
+                    msg: "network".into(),
+                },
+                "Network error: network",
+            ),
+            (
+                TakerError::General {
+                    msg: "general".into(),
+                },
+                "General error: general",
+            ),
+            (TakerError::IO { msg: "io".into() }, "IO error: io"),
+        ];
+
+        for (error, expected) in errors {
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn upstream_taker_errors_keep_their_display_text_and_category() {
+        let wallet_error = TakerError::from(OpenswapTakerError::Wallet(
+            OpenswapWalletError::General("wallet detail".into()),
+        ));
+        assert!(matches!(
+            wallet_error,
+            TakerError::Wallet { msg } if msg == "wallet detail"
+        ));
+
+        let network_error = TakerError::from(OpenswapTakerError::Net(NetError::ConnectionTimedOut));
+        assert!(matches!(
+            network_error,
+            TakerError::Network { msg } if msg == "ConnectionTimedOut"
+        ));
+    }
+
+    #[test]
+    fn all_exported_taker_behavior_variants_remain_distinct() {
+        let variants = [
+            TakerBehavior::Normal,
+            TakerBehavior::DropConnectionAfterFullSetup,
+            TakerBehavior::BroadcastContractAfterFullSetup,
+        ];
+        assert_eq!(variants.len(), 3);
+        assert_ne!(variants[0], variants[1]);
+        assert_ne!(variants[1], variants[2]);
+        assert_ne!(variants[0], variants[2]);
+    }
 }

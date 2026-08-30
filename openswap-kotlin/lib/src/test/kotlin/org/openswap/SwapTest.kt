@@ -18,6 +18,8 @@ import kotlin.test.assertTrue
 class SwapTest {
 
     companion object {
+        private const val WALLET_PASSWORD = "ffi-live-test-wallet-password"
+
         /** Keep the native handle alive until this case's JVM exits. */
         private val liveTakers = mutableListOf<Taker>()
     }
@@ -161,7 +163,7 @@ class SwapTest {
             controlPort = 9051u,
             torAuthPassword = "openswap",
             zmqAddr = "tcp://localhost:28332",
-            password = "",
+            password = WALLET_PASSWORD,
             // Public discovery can return makers from another concurrent CI job.
             nostrRelays = emptyList(),
             backendConfig = backendConfig,

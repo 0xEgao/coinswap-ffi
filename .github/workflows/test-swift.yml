@@ -60,6 +60,12 @@ jobs:
       - name: Clean SwiftPM build artifacts
         run: swift package clean
 
+      - name: "Build Swift package"
+        run: bash ./build-xcframework-ci.sh
+
+      - name: "Run network-free Swift API contract tests"
+        run: swift test --filter "OpenswapTests.ApiContractTests"
+
       - name: Setup Docker on macOS
         uses: douglascamata/setup-docker-macos-action@v1.1.0
         with:
@@ -121,9 +127,6 @@ jobs:
             colima list || true
             exit 1
           fi
-
-      - name: "Build Swift package"
-        run: bash ./build-xcframework-ci.sh
 
       - name: Wait for local makers
         run: |

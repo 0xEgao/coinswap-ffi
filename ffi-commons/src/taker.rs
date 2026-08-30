@@ -61,48 +61,73 @@ fn checked_satoshi_amount(amount: i64) -> Result<u64, TakerError> {
     })
 }
 
+fn parse_protocol(protocol: Option<&str>) -> Result<ProtocolVersion, TakerError> {
+    match protocol.unwrap_or("Legacy") {
+        "Legacy" | "legacy" => Ok(ProtocolVersion::Legacy),
+        "Taproot" | "taproot" => Ok(ProtocolVersion::Taproot),
+        other => Err(TakerError::General {
+            msg: format!("Invalid protocol: {} (expected legacy or taproot)", other),
+        }),
+    }
+}
+
+fn parse_outpoints(
+    outpoints: Option<Vec<OutPoint>>,
+) -> Result<Option<Vec<openswapOutPoint>>, TakerError> {
+    outpoints
+        .map(|outpoints| {
+            outpoints
+                .into_iter()
+                .map(|outpoint| {
+                    let txid = outpoint
+                        .txid
+                        .value
+                        .parse::<openswapTxid>()
+                        .map_err(|error| TakerError::General {
+                            msg: format!("Invalid txid: {}", error),
+                        })?;
+                    Ok(openswapOutPoint::new(txid, outpoint.vout))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()
+}
+
+fn format_offer(maker_offer: &Offer) -> Result<String, TakerError> {
+    let offer_json = serde_json::json!({
+        "base_fee": maker_offer.base_fee,
+        "amount_relative_fee_pct": maker_offer.amount_relative_fee_pct,
+        "time_relative_fee_pct": maker_offer.time_relative_fee_pct,
+        "required_confirms": maker_offer.required_confirms,
+        "minimum_locktime": maker_offer.minimum_locktime,
+        "max_size": maker_offer.max_size,
+        "min_size": maker_offer.min_size,
+    });
+
+    serde_json::to_string_pretty(&offer_json).map_err(|error| TakerError::General {
+        msg: format!("Failed to serialize offer: {error}"),
+    })
+}
+
 /// SwapParams govern the criteria to find suitable set of makers from the offerbook.
 impl TryFrom<SwapParams> for OpenswapSwapParams {
     type Error = TakerError;
 
     /// Swap specific parameters. These are user's policy and can differ among swaps.
     fn try_from(params: SwapParams) -> Result<Self, Self::Error> {
-        let protocol = match params.protocol.as_deref().unwrap_or("Legacy") {
-            "Legacy" | "legacy" => ProtocolVersion::Legacy,
-            "Taproot" | "taproot" => ProtocolVersion::Taproot,
-            other => {
-                return Err(TakerError::General {
-                    msg: format!("Invalid protocol: {} (expected legacy or taproot)", other),
-                });
-            }
-        };
+        let protocol = parse_protocol(params.protocol.as_deref())?;
 
         let send_amount = openswapAmount::from_sat(params.send_amount);
 
-        let manually_selected_outpoints = params
-            .manually_selected_outpoints
-            .map(|outpoints| -> Result<Vec<openswapOutPoint>, TakerError> {
-                outpoints
-                    .into_iter()
-                    .map(|op| {
-                        let txid = op.txid.value.parse::<openswapTxid>().map_err(|e| {
-                            TakerError::General {
-                                msg: format!("Invalid txid: {}", e),
-                            }
-                        })?;
-                        Ok(openswapOutPoint::new(txid, op.vout))
-                    })
-                    .collect()
-            })
-            .transpose()?;
+        let manually_selected_outpoints = parse_outpoints(params.manually_selected_outpoints)?;
 
         let payment_address = params
             .payment_address
             .map(|address| {
                 address
                     .parse::<OpenswapAddress<NetworkUnchecked>>()
-                    .map_err(|e| TakerError::General {
-                        msg: format!("Invalid payment address: {}", e),
+                    .map_err(|error| TakerError::General {
+                        msg: format!("Invalid payment address '{address}': {error}"),
                     })
             })
             .transpose()?;
@@ -251,8 +276,8 @@ impl Taker {
         })?;
         let txns = wallet
             .get_transactions(count.map(|c| c as usize), skip.map(|s| s as usize))
-            .map_err(|e| TakerError::Wallet {
-                msg: format!("Get Transactions Error: {:?}", e),
+            .map_err(|error| TakerError::Wallet {
+                msg: format!("Get transactions error: {error}"),
             })?;
 
         Ok(txns
@@ -309,8 +334,8 @@ impl Taker {
         let wallet = &mut *wallet;
         let internal_addresses = wallet
             .get_next_internal_addresses(count, cs_address_type)
-            .map_err(|e| TakerError::Wallet {
-                msg: format!("Get internal addresses error: {:?}", e),
+            .map_err(|error| TakerError::Wallet {
+                msg: format!("Get internal addresses error: {error}"),
             })?;
         Ok(internal_addresses.into_iter().map(Address::from).collect())
     }
@@ -330,11 +355,12 @@ impl Taker {
             .map_err(|_| TakerError::General {
                 msg: "Failed to acquire wallet write lock".to_string(),
             })?;
-        let external_address = wallet
-            .get_next_external_address(cs_address_type)
-            .map_err(|e| TakerError::Wallet {
-                msg: format!("Get next external address error: {:?}", e),
-            })?;
+        let external_address =
+            wallet
+                .get_next_external_address(cs_address_type)
+                .map_err(|error| TakerError::Wallet {
+                    msg: format!("Get next external address error: {error}"),
+                })?;
         Ok(Address::from(external_address))
     }
 
@@ -493,8 +519,8 @@ impl Taker {
                 msg: "Failed to acquire wallet write lock".to_string(),
             })?
             .backup_wallet_gui_app(destination_path, password)
-            .map_err(|e| TakerError::Wallet {
-                msg: format!("Backup error: {:?}", e),
+            .map_err(|error| TakerError::Wallet {
+                msg: format!("Backup error: {error}"),
             })?;
         Ok(())
     }
@@ -511,8 +537,8 @@ impl Taker {
                 msg: "Failed to acquire wallet write lock".to_string(),
             })?
             .lock_unspendable_utxos()
-            .map_err(|e| TakerError::Wallet {
-                msg: format!("Lock error: {:?}", e),
+            .map_err(|error| TakerError::Wallet {
+                msg: format!("Lock error: {error}"),
             })?;
         Ok(())
     }
@@ -526,21 +552,7 @@ impl Taker {
         manually_selected_outpoints: Option<Vec<OutPoint>>,
     ) -> Result<Txid, TakerError> {
         let amount = checked_satoshi_amount(amount)?;
-        let manually_selected_outpoints = manually_selected_outpoints
-            .map(|outpoints| -> Result<Vec<openswapOutPoint>, TakerError> {
-                outpoints
-                    .into_iter()
-                    .map(|op| {
-                        let txid = op.txid.value.parse::<openswapTxid>().map_err(|e| {
-                            TakerError::General {
-                                msg: format!("Invalid txid: {}", e),
-                            }
-                        })?;
-                        Ok(openswapOutPoint::new(txid, op.vout))
-                    })
-                    .collect()
-            })
-            .transpose()?;
+        let manually_selected_outpoints = parse_outpoints(manually_selected_outpoints)?;
 
         let taker = self.taker.lock().map_err(|_| TakerError::General {
             msg: "Failed to acquire taker lock".to_string(),
@@ -552,8 +564,8 @@ impl Taker {
                 msg: "Failed to acquire wallet write lock".to_string(),
             })?
             .send_to_address(amount, address, fee_rate, manually_selected_outpoints)
-            .map_err(|e| TakerError::Wallet {
-                msg: format!("Send to Address error: {:?}", e),
+            .map_err(|error| TakerError::Wallet {
+                msg: format!("Send to address error: {error}"),
             })?;
         Ok(txid.into())
     }
@@ -569,8 +581,8 @@ impl Taker {
         let wallet = taker.get_wallet().read().map_err(|_| TakerError::General {
             msg: "Failed to acquire wallet read lock".to_string(),
         })?;
-        let balances = wallet.get_balances().map_err(|e| TakerError::Wallet {
-            msg: format!("Get balances error: {:?}", e),
+        let balances = wallet.get_balances().map_err(|error| TakerError::Wallet {
+            msg: format!("Get balances error: {error}"),
         })?;
         Ok(Balances::from(balances))
     }
@@ -590,19 +602,16 @@ impl Taker {
                 msg: "Failed to acquire wallet write lock".to_string(),
             })?
             .sync_and_save(&openswap::utill::NO_SHUTDOWN)
-            .map_err(|e| TakerError::Wallet {
-                msg: format!("Sync wallet error: {:?}", e),
+            .map_err(|error| TakerError::Wallet {
+                msg: format!("Sync wallet error: {error}"),
             })?;
         Ok(())
     }
 
     /// Runs a full offerbook sync cycle and blocks until it completes.
     pub fn sync_offerbook_and_wait(&self) -> Result<(), TakerError> {
-        let taker = self.taker.lock().map_err(|e| TakerError::General {
-            msg: format!(
-                "Failed to acquire taker lock for offerbook sync check: {:?}",
-                e
-            ),
+        let taker = self.taker.lock().map_err(|_| TakerError::General {
+            msg: "Failed to acquire taker lock".to_string(),
         })?;
         taker
             .sync_offerbook_and_wait()
@@ -651,18 +660,7 @@ impl Taker {
     /// Displays a maker offer candidate in a human-readable format.
     /// If the maker does not yet have an offer, a partial view is shown.
     pub fn display_offer(&self, maker_offer: &Offer) -> Result<String, TakerError> {
-        let offer_json = serde_json::json!({
-            "base_fee": maker_offer.base_fee,
-            "amount_relative_fee_pct": maker_offer.amount_relative_fee_pct,
-            "time_relative_fee_pct": maker_offer.time_relative_fee_pct,
-            "required_confirms": maker_offer.required_confirms,
-            "minimum_locktime": maker_offer.minimum_locktime,
-            "max_size": maker_offer.max_size,
-            "min_size": maker_offer.min_size,
-        });
-
-        serde_json::to_string_pretty(&offer_json)
-            .map_err(|e| TakerError::General { msg: e.to_string() })
+        format_offer(maker_offer)
     }
 
     /// Get the wallet name
@@ -708,23 +706,210 @@ impl Taker {
             msg: "Failed to acquire taker lock".to_string(),
         })?;
 
-        let is_deniable = taker
-            .verify_deniability(&swap_id)
-            .map_err(|e| TakerError::General {
-                msg: format!("Deniability verification error: {:?}", e),
-            })?;
+        let is_deniable =
+            taker
+                .verify_deniability(&swap_id)
+                .map_err(|error| TakerError::General {
+                    msg: format!("Deniability verification error: {error}"),
+                })?;
         Ok(is_deniable)
     }
 }
 
 #[cfg(test)]
-mod security_tests {
-    use super::checked_satoshi_amount;
+mod contract_tests {
+    use super::{
+        SwapParams, checked_satoshi_amount, format_offer, parse_outpoints, parse_protocol,
+    };
+    use crate::types::{
+        Amount, FidelityBond, FidelityProof, LockTime, Offer, OutPoint, PublicKey, TakerError, Txid,
+    };
+    use openswap::{
+        bitcoin::{
+            Address as OpenswapAddress, Amount as OpenswapAmount, Txid as OpenswapTxid,
+            address::NetworkUnchecked,
+        },
+        protocol::ProtocolVersion,
+    };
+
+    fn error_message(error: TakerError) -> String {
+        match error {
+            TakerError::General { msg } => msg,
+            other => panic!("expected General error, got {other}"),
+        }
+    }
+
+    fn swap_params(protocol: Option<&str>) -> SwapParams {
+        SwapParams {
+            protocol: protocol.map(str::to_owned),
+            send_amount: 50_000,
+            maker_count: 2,
+            tx_count: None,
+            required_confirms: None,
+            manually_selected_outpoints: None,
+            preferred_makers: None,
+            payment_address: None,
+        }
+    }
 
     #[test]
-    fn checked_satoshi_amount_rejects_negative_values() {
-        assert!(checked_satoshi_amount(-1).is_err());
+    fn signed_satoshi_amount_rejects_negative_values_and_preserves_valid_values() {
+        assert_eq!(
+            error_message(checked_satoshi_amount(-1).unwrap_err()),
+            "Amount must be non-negative"
+        );
         assert_eq!(checked_satoshi_amount(0).unwrap(), 0);
-        assert_eq!(checked_satoshi_amount(50_000).unwrap(), 50_000);
+        assert_eq!(checked_satoshi_amount(i64::MAX).unwrap(), i64::MAX as u64);
+    }
+
+    #[test]
+    fn protocol_domain_accepts_documented_values_and_defaults_to_legacy() {
+        assert!(matches!(parse_protocol(None), Ok(ProtocolVersion::Legacy)));
+        assert!(matches!(
+            parse_protocol(Some("Legacy")),
+            Ok(ProtocolVersion::Legacy)
+        ));
+        assert!(matches!(
+            parse_protocol(Some("legacy")),
+            Ok(ProtocolVersion::Legacy)
+        ));
+        assert!(matches!(
+            parse_protocol(Some("Taproot")),
+            Ok(ProtocolVersion::Taproot)
+        ));
+        assert!(matches!(
+            parse_protocol(Some("taproot")),
+            Ok(ProtocolVersion::Taproot)
+        ));
+        assert_eq!(
+            error_message(parse_protocol(Some("Unified")).unwrap_err()),
+            "Invalid protocol: Unified (expected legacy or taproot)"
+        );
+    }
+
+    #[test]
+    fn swap_params_apply_defaults_and_preserve_explicit_policy() {
+        let defaults = openswap::taker::api::SwapParams::try_from(swap_params(None)).unwrap();
+        assert!(matches!(defaults.protocol, ProtocolVersion::Legacy));
+        assert_eq!(defaults.send_amount, OpenswapAmount::from_sat(50_000));
+        assert_eq!(defaults.maker_count, 2);
+        assert_eq!(defaults.tx_count, 1);
+        assert_eq!(defaults.required_confirms, 1);
+        assert!(defaults.manually_selected_outpoints.is_none());
+        assert!(defaults.preferred_makers.is_none());
+        assert!(defaults.payment_address.is_none());
+
+        let txid = "0000000000000000000000000000000000000000000000000000000000000001";
+        let explicit = openswap::taker::api::SwapParams::try_from(SwapParams {
+            protocol: Some("Taproot".to_string()),
+            send_amount: u64::MAX,
+            maker_count: u32::MAX,
+            tx_count: Some(4),
+            required_confirms: Some(6),
+            manually_selected_outpoints: Some(vec![OutPoint {
+                txid: Txid {
+                    value: txid.to_string(),
+                },
+                vout: 7,
+            }]),
+            preferred_makers: Some(vec!["maker.example:6102".to_string()]),
+            payment_address: Some("1BoatSLRHtKNngkdXEeobR76b53LETtpyT".to_string()),
+        })
+        .unwrap();
+        assert!(matches!(explicit.protocol, ProtocolVersion::Taproot));
+        assert_eq!(explicit.send_amount, OpenswapAmount::from_sat(u64::MAX));
+        assert_eq!(explicit.maker_count, u32::MAX as usize);
+        assert_eq!(explicit.tx_count, 4);
+        assert_eq!(explicit.required_confirms, 6);
+        assert_eq!(
+            explicit.manually_selected_outpoints.unwrap()[0].to_string(),
+            format!("{txid}:7")
+        );
+        assert_eq!(explicit.preferred_makers.unwrap(), ["maker.example:6102"]);
+        assert_eq!(
+            explicit
+                .payment_address
+                .unwrap()
+                .assume_checked()
+                .to_string(),
+            "1BoatSLRHtKNngkdXEeobR76b53LETtpyT"
+        );
+    }
+
+    #[test]
+    fn outpoint_and_payment_address_validation_fails_before_wallet_access() {
+        let invalid_txid = "not-a-txid";
+        let txid_error = invalid_txid.parse::<OpenswapTxid>().unwrap_err();
+        let error = parse_outpoints(Some(vec![OutPoint {
+            txid: Txid {
+                value: invalid_txid.to_string(),
+            },
+            vout: 0,
+        }]))
+        .unwrap_err();
+        assert_eq!(error_message(error), format!("Invalid txid: {txid_error}"));
+
+        let invalid_address = "not-a-bitcoin-address";
+        let address_error = invalid_address
+            .parse::<OpenswapAddress<NetworkUnchecked>>()
+            .unwrap_err();
+        let mut params = swap_params(None);
+        params.payment_address = Some(invalid_address.to_string());
+        assert_eq!(
+            error_message(openswap::taker::api::SwapParams::try_from(params).unwrap_err()),
+            format!("Invalid payment address '{invalid_address}': {address_error}")
+        );
+    }
+
+    #[test]
+    fn offer_display_is_valid_json_with_only_the_documented_summary_fields() {
+        let offer = Offer {
+            base_fee: -5,
+            amount_relative_fee_pct: 0.125,
+            time_relative_fee_pct: 0.25,
+            required_confirms: 3,
+            minimum_locktime: 48,
+            max_size: 2_000_000,
+            min_size: 50_000,
+            tweakable_point: PublicKey {
+                compressed: true,
+                inner: vec![2; 33],
+            },
+            fidelity: FidelityProof {
+                bond: FidelityBond {
+                    outpoint: OutPoint {
+                        txid: Txid {
+                            value: "00".repeat(32),
+                        },
+                        vout: 0,
+                    },
+                    amount: Amount { sats: 1_000 },
+                    lock_time: LockTime {
+                        lock_type: "Blocks".to_string(),
+                        value: 144,
+                    },
+                    pubkey: PublicKey {
+                        compressed: true,
+                        inner: vec![3; 33],
+                    },
+                    conf_height: Some(100),
+                    cert_expiry: Some(200),
+                    is_spent: false,
+                },
+                cert_hash: vec![4; 32],
+                cert_sig: vec![5; 64],
+            },
+        };
+
+        let displayed: serde_json::Value =
+            serde_json::from_str(&format_offer(&offer).unwrap()).unwrap();
+        assert_eq!(displayed.as_object().unwrap().len(), 7);
+        assert_eq!(displayed["base_fee"], -5);
+        assert_eq!(displayed["amount_relative_fee_pct"], 0.125);
+        assert_eq!(displayed["time_relative_fee_pct"], 0.25);
+        assert_eq!(displayed["required_confirms"], 3);
+        assert_eq!(displayed["minimum_locktime"], 48);
+        assert_eq!(displayed["max_size"], 2_000_000);
+        assert_eq!(displayed["min_size"], 50_000);
     }
 }

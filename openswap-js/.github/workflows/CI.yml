@@ -43,6 +43,8 @@ jobs:
         run: cargo fmt -- --check
       - name: Clippy
         run: cargo clippy
+      - name: Network-free binding contract tests
+        run: cargo test --lib
   build:
     strategy:
       fail-fast: false

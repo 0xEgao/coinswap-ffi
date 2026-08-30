@@ -55,6 +55,14 @@ jobs:
             libssl-dev \
             pkg-config
 
+      - name: Run network-free FFI contract tests
+        working-directory: ./ffi-commons
+        run: cargo test contract_tests -- --nocapture
+
+      - name: Run network-free Node adapter contract tests
+        working-directory: ./openswap-js
+        run: cargo test --lib
+
       - name: Check Docker
         run: |
           docker --version

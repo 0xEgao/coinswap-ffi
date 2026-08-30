@@ -47,6 +47,7 @@ export declare class Taker {
   fetchAllMakers(): Array<string>
   fetchOffers(): OfferBook
   static isWalletEncrypted(walletPath: string): boolean
+  verifyDeniability(swapId: string): boolean
 }
 
 export interface Address {

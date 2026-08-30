@@ -715,3 +715,157 @@ impl TryFrom<AddressType> for openswap::wallet::AddressType {
 pub struct WalletBackup {
   pub file_name: String,
 }
+
+#[cfg(test)]
+mod contract_tests {
+  use super::*;
+  use openswap::bitcoin::absolute::{Height, Time};
+
+  fn backend(kind: &str) -> BackendConfig {
+    BackendConfig {
+      kind: kind.to_owned(),
+      url: None,
+      username: None,
+      password: None,
+      wallet_name: None,
+      zmq_addr: None,
+      socks5: None,
+      timeout: None,
+      poll_interval_secs: None,
+      max_retries: None,
+    }
+  }
+
+  #[test]
+  fn backend_config_validates_kinds_credentials_and_electrum_url() {
+    let invalid = OpenswapBackendConfig::try_from(backend("unknown")).unwrap_err();
+    assert_eq!(
+      invalid.reason,
+      "Invalid backend kind: unknown (expected rpc or electrum)"
+    );
+
+    let mut incomplete_rpc = backend("rpc");
+    incomplete_rpc.username = Some("user".to_owned());
+    assert_eq!(
+      OpenswapBackendConfig::try_from(incomplete_rpc)
+        .unwrap_err()
+        .reason,
+      "RPC backend requires username and password together"
+    );
+
+    assert_eq!(
+      OpenswapBackendConfig::try_from(backend("electrum"))
+        .unwrap_err()
+        .reason,
+      "Electrum backend requires url"
+    );
+  }
+
+  #[test]
+  fn backend_config_preserves_explicit_rpc_and_electrum_options() {
+    let mut rpc = backend("RPC");
+    rpc.url = Some("http://node:8332".to_owned());
+    rpc.username = Some("alice".to_owned());
+    rpc.password = Some("secret".to_owned());
+    rpc.wallet_name = Some("wallet".to_owned());
+    rpc.zmq_addr = Some("tcp://node:28332".to_owned());
+    match OpenswapBackendConfig::try_from(rpc).unwrap() {
+      OpenswapBackendConfig::CoreRpc(config) => {
+        assert_eq!(config.url, "http://node:8332");
+        assert_eq!(config.wallet_name, "wallet");
+        assert_eq!(config.zmq_addr, "tcp://node:28332");
+        assert!(
+          matches!(config.auth, Auth::UserPass(user, password) if user == "alice" && password == "secret")
+        );
+      }
+      _ => panic!("RPC kind must produce the CoreRpc backend"),
+    }
+
+    let mut electrum = backend("Electrum");
+    electrum.url = Some("ssl://electrum.example:50002".to_owned());
+    electrum.socks5 = Some("127.0.0.1:9050".to_owned());
+    electrum.timeout = Some(120);
+    electrum.poll_interval_secs = Some(15);
+    electrum.max_retries = Some(8);
+    match OpenswapBackendConfig::try_from(electrum).unwrap() {
+      OpenswapBackendConfig::Electrum(config) => {
+        assert_eq!(config.url, "ssl://electrum.example:50002");
+        assert_eq!(config.socks5.as_deref(), Some("127.0.0.1:9050"));
+        assert_eq!(config.timeout, Some(120));
+        assert_eq!(config.poll_interval_secs, Some(15));
+        assert_eq!(config.max_retries, 8);
+      }
+      _ => panic!("Electrum kind must produce the Electrum backend"),
+    }
+  }
+
+  #[test]
+  fn public_enum_and_error_variants_remain_distinct() {
+    let errors = [
+      TakerError::Wallet,
+      TakerError::Protocol,
+      TakerError::Network,
+      TakerError::General,
+      TakerError::IO,
+    ];
+    assert_eq!(
+      errors.map(|error| error.to_string()),
+      [
+        "Wallet error",
+        "Protocol error",
+        "Network error",
+        "General error",
+        "IO error",
+      ]
+    );
+
+    assert!(matches!(
+      openswap::wallet::AddressType::try_from(AddressType::P2WPKH).unwrap(),
+      openswap::wallet::AddressType::P2WPKH
+    ));
+    assert!(matches!(
+      openswap::wallet::AddressType::try_from(AddressType::P2TR).unwrap(),
+      openswap::wallet::AddressType::P2TR
+    ));
+  }
+
+  #[test]
+  fn locktime_conversion_keeps_height_and_timestamp_semantics() {
+    let blocks = LockTime::from(csLocktime::Blocks(Height::from_consensus(144).unwrap()));
+    assert_eq!(blocks.lock_type, "Blocks");
+    assert_eq!(blocks.value, 144);
+
+    let seconds = LockTime::from(csLocktime::Seconds(
+      Time::from_consensus(500_000_000).unwrap(),
+    ));
+    assert_eq!(seconds.lock_type, "Seconds");
+    assert_eq!(seconds.value, 500_000_000);
+  }
+
+  #[test]
+  fn maker_state_and_protocol_conversion_cover_every_variant() {
+    let states = [
+      MakerState::from(csMakerState::Good),
+      MakerState::from(csMakerState::Unresponsive { retries: 7 }),
+      MakerState::from(csMakerState::Bad),
+    ];
+    assert_eq!(states[0].state_type, "Good");
+    assert_eq!(states[0].retries, None);
+    assert_eq!(states[1].state_type, "Unresponsive");
+    assert_eq!(states[1].retries, Some(7));
+    assert_eq!(states[2].state_type, "Bad");
+
+    assert_eq!(
+      MakerProtocol::from(csMakerProtocol::Legacy).protocol_type,
+      "Legacy"
+    );
+    assert_eq!(
+      MakerProtocol::from(csMakerProtocol::Taproot).protocol_type,
+      "Taproot"
+    );
+    assert_eq!(
+      MakerProtocol::from(csMakerProtocol::Unified).protocol_type,
+      "Unified"
+    );
+  }
+}

@@ -21,6 +21,7 @@ const liveTestsEnabled = process.env.OPENSWAP_LIVE_TESTS === '1'
 
 // Sats swapped per taker; funded with 4x this (1.0 BTC across 4 addresses).
 const SWAP_AMOUNT = 500_000
+const WALLET_PASSWORD = 'ffi-live-test-wallet-password'
 
 const RPC_AUTH_ARGS = ['-regtest', '-rpcport=18442', '-rpcuser=user', '-rpcpassword=password']
 
@@ -105,7 +106,7 @@ for (const { name, backend, protocol, addressType } of CASES) {
       9051,
       'openswap',
       'tcp://127.0.0.1:28332',
-      '',
+      WALLET_PASSWORD,
       backendConfig,
     )
 
