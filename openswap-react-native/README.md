@@ -63,7 +63,7 @@ npm run ubrn:ios
 npm run typecheck
 
 # 5) Run default test suite
-#    - Jest tests (live tests are skipped unless OPENSWAP_LIVE_TESTS=1)
+#    - Jest API-contract tests
 #    - Android native smoke test
 #    - Swift native smoke test
 npm test
@@ -76,6 +76,9 @@ npm run test:android
 
 # 8) Run only Swift smoke test
 npm run test:swift
+
+# 9) Run one generated-binding live swap after generating N-API bindings
+OPENSWAP_SWAP_CASE=legacy_rpc npm run test:live
 ```
 
 ### Using uniffi-bindgen-react-native (recommended)
@@ -137,7 +140,7 @@ const taker = await OpenswapTaker.init({
   controlPort: 9051,                         // Tor control port
   torAuthPassword: 'openswap',               // Tor control password
   zmqAddr: 'tcp://127.0.0.1:28332',          // Bitcoin Core ZMQ endpoint
-  password: '',                              // optional wallet encryption password
+  password: 'wallet-passphrase',             // required wallet encryption password
 })
 
 // Sync wallet state and wait for the offer book.

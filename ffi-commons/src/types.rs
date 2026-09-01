@@ -33,7 +33,7 @@ use std::path::PathBuf;
 
 /// Configuration parameters for connecting to a Bitcoin node via RPC.
 #[derive(Debug, Clone, uniffi::Record)]
-pub struct RPCConfig {
+pub struct RpcConfig {
     /// The bitcoin node url
     pub url: String,
     /// The bitcoin node username
@@ -44,7 +44,7 @@ pub struct RPCConfig {
     pub wallet_name: String,
 }
 
-impl RPCConfig {
+impl RpcConfig {
     pub fn into_core_rpc_config(self, zmq_addr: String) -> OpenswapCoreRpcConfig {
         OpenswapCoreRpcConfig {
             url: self.url,
@@ -55,8 +55,8 @@ impl RPCConfig {
     }
 }
 
-impl From<RPCConfig> for OpenswapCoreRpcConfig {
-    fn from(config: RPCConfig) -> Self {
+impl From<RpcConfig> for OpenswapCoreRpcConfig {
+    fn from(config: RpcConfig) -> Self {
         let default = Self::default();
         Self {
             url: config.url,
@@ -843,7 +843,7 @@ pub fn fetch_mempool_fees() -> Result<FeeRates, TakerError> {
 pub fn restore_wallet_gui_app(
     data_dir: Option<String>,
     wallet_file_name: Option<String>,
-    rpc_config: RPCConfig,
+    rpc_config: RpcConfig,
     backup_file_path: String,
     password: Option<String>,
 ) {
@@ -869,8 +869,8 @@ pub fn is_wallet_encrypted(wallet_path: String) -> Result<bool, TakerError> {
 }
 
 #[uniffi::export]
-pub fn create_default_rpc_config() -> RPCConfig {
-    RPCConfig {
+pub fn create_default_rpc_config() -> RpcConfig {
+    RpcConfig {
         url: "http://127.0.0.1:38332".to_string(),
         username: "user".to_string(),
         password: "password".to_string(),

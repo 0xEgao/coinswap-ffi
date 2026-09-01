@@ -26,6 +26,7 @@ TOR_SOCKS_PORT="9050"
 TOR_CONTROL_PORT="9051"
 MAKER_STARTUP_TIMEOUT_SECONDS="${MAKER_STARTUP_TIMEOUT_SECONDS:-120}"
 MAKER_RESTART_LIMIT="${MAKER_RESTART_LIMIT:-3}"
+STACK_READY_TIMEOUT_SECONDS="${STACK_READY_TIMEOUT_SECONDS:-300}"
 
 # RPC maker (Bitcoin Core backend) and Electrum maker (electrs backend).
 RPC_MAKERS=("makerd1")
@@ -255,6 +256,75 @@ wait_for_maker_funding_address() {
     return 1
 }
 
+wait_for_stack_ready() {
+    local elapsed=0
+    local maker_name
+    local container_name
+    local container_status
+    local restart_count
+    local started_at
+    local maker_logs
+    local setup_count
+    local onion_count
+    local all_ready
+
+    check_docker
+    print_info "Waiting for both makers to finish setup and publish onion addresses..."
+
+    while [ "$elapsed" -lt "$STACK_READY_TIMEOUT_SECONDS" ]; do
+        all_ready=true
+
+        for maker_name in "${ALL_MAKERS[@]}"; do
+            container_name="openswap-${maker_name}"
+            container_status=$(docker inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null || true)
+            restart_count=$(docker inspect --format '{{.RestartCount}}' "$container_name" 2>/dev/null || true)
+
+            if [ -z "$container_status" ] \
+                || [ "$container_status" = "exited" ] \
+                || [ "$container_status" = "dead" ] \
+                || { [ "${restart_count:-0}" -ge "$MAKER_RESTART_LIMIT" ] 2>/dev/null; }; then
+                print_maker_startup_diagnostics "$container_name"
+                return 1
+            fi
+
+            if [ "$container_status" != "running" ]; then
+                all_ready=false
+                continue
+            fi
+
+            # Container logs survive restarts. Restrict readiness checks to the
+            # current run so stale setup/onion messages cannot pass this gate.
+            started_at=$(docker inspect --format '{{.State.StartedAt}}' "$container_name" 2>/dev/null || true)
+            if [ -z "$started_at" ]; then
+                all_ready=false
+                continue
+            fi
+            maker_logs=$(docker logs --since "$started_at" "$container_name" 2>&1 || true)
+            setup_count=$(printf '%s\n' "$maker_logs" | grep -c "Server setup complete" || true)
+            onion_count=$(printf '%s\n' "$maker_logs" | grep -c "Generated new Tor Hidden Service Hostname" || true)
+            if [ "$setup_count" -lt 1 ] || [ "$onion_count" -lt 1 ]; then
+                all_ready=false
+            fi
+        done
+
+        if $all_ready; then
+            print_success "Both local makers are ready"
+            return 0
+        fi
+
+        sleep 5
+        elapsed=$((elapsed + 5))
+        print_info "Still waiting for makers (${elapsed}/${STACK_READY_TIMEOUT_SECONDS}s)..."
+    done
+
+    print_error "Timed out after ${STACK_READY_TIMEOUT_SECONDS}s waiting for the local makers."
+    docker compose -f "$COMPOSE_FILE" ps -a 2>&1 || true
+    for maker_name in "${ALL_MAKERS[@]}"; do
+        print_maker_startup_diagnostics "openswap-${maker_name}"
+    done
+    return 1
+}
+
 fund_makers() {
     print_info "Funding makers with Bitcoin (regtest)..."
 
@@ -367,6 +437,7 @@ show_help() {
     echo "  build               Build the Openswap Docker image"
     echo "  build-bitcoin       Build the Bitcoin Mutinynet Docker image"
     echo "  start               Start the full stack (bitcoind + electrs + tor + 2 makers)"
+    echo "  wait-ready          Wait until both makers are ready for live tests"
     echo "  stop                Stop the Openswap stack and block mining"
     echo "  restart             Restart the Openswap stack"
     echo "  fund-makers         Manually fund maker wallets (done automatically on start)"
@@ -427,6 +498,9 @@ case "$COMMAND" in
             print_info "Ignoring maker-count argument '${SUBCOMMAND_ARG}': stack topology is fixed (1 RPC + 1 Electrum maker)."
         fi
         start_stack
+        ;;
+    "wait-ready")
+        wait_for_stack_ready
         ;;
     "stop")
         stop_stack

@@ -1,0 +1,113 @@
+name: Ruby Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "openswap-ruby/**"
+      - "ffi-commons/**"
+      - ".github/workflows/test-ruby.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "openswap-ruby/**"
+      - "ffi-commons/**"
+      - ".github/workflows/test-ruby.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test-ruby:
+    name: Test Ruby Bindings
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ffi-commons/target/
+          key: ${{ runner.os }}-cargo-ruby-${{ hashFiles('ffi-commons/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-ruby-
+            ${{ runner.os }}-cargo-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev pkg-config ruby ruby-dev ruby-ffi
+
+      - name: Build Ruby bindings
+        working-directory: ./openswap-ruby
+        run: bash ./build-scripts/development/build-dev-linux-x86_64.sh
+
+      - name: Run Ruby binding contract tests
+        working-directory: ./openswap-ruby
+        run: LD_LIBRARY_PATH="$PWD" ruby test/api_contract_test.rb
+
+      - name: Set up Docker environment
+        working-directory: ./ffi-commons
+        run: |
+          chmod +x ffi-docker-setup
+          if docker pull openswap/bitcoin-mutinynet:latest && docker pull openswap/openswap:master; then
+            echo "Using prebuilt Docker images"
+          else
+            echo "Prebuilt image pull failed; falling back to local image build"
+            ./ffi-docker-setup setup
+          fi
+          ./ffi-docker-setup start
+          ./ffi-docker-setup wait-ready
+
+      - name: Run isolated Ruby live swap tests
+        working-directory: ./openswap-ruby
+        timeout-minutes: 40
+        run: |
+          set -euo pipefail
+          for test_case in legacy_rpc taproot_rpc legacy_electrum taproot_electrum; do
+            echo "Running Ruby swap test: ${test_case}"
+            timeout --signal=TERM --kill-after=30s 10m \
+              env LD_LIBRARY_PATH="$PWD" ruby test/swap_test.rb "${test_case}"
+          done
+
+      - name: Collect failure logs
+        if: failure()
+        working-directory: ./ffi-commons
+        run: docker compose -f docker-compose.electrum-regtest.yml logs --no-color > "${RUNNER_TEMP}/ruby-docker.log" 2>&1 || true
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ruby-integration-logs
+          path: |
+            ${{ runner.temp }}/ruby-docker.log
+            ~/.openswap/taker/**/debug.log
+            ffi-commons/.block-mining.log
+          retention-days: 7
+
+      - name: Clean up Docker environment
+        if: always()
+        working-directory: ./ffi-commons
+        run: ./ffi-docker-setup stop || true

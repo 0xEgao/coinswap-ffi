@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-TMP_DIR=$(mktemp -d /private/tmp/openswap-rn-android-smoke.XXXXXX)
+TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/openswap-rn-android-smoke.XXXXXX")
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 mkdir -p \
