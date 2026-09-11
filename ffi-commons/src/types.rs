@@ -24,8 +24,8 @@ use openswap::{
         Balances as OpenswapBalances, CoreRpcConfig as OpenswapCoreRpcConfig,
         ElectrumConfig as OpenswapElectrumConfig, FidelityBond as csFidelityBond,
         ffi::{
-            MakerFeeInfo as csMakerFeeInfo, TakerReport as csTakerReport,
-            restore_wallet_gui_app as cs_restore_wallet_gui_app,
+            MakerFeeInfo as csMakerFeeInfo, ReportUtxo as csReportUtxo,
+            TakerReport as csTakerReport, restore_wallet_gui_app as cs_restore_wallet_gui_app,
         },
     },
 };
@@ -693,10 +693,10 @@ pub struct SwapReport {
     pub outgoing_amount: i64,
     /// Fee paid (negative)
     pub fee_paid: i64,
-    /// Incoming contract txid
-    pub incoming_contract_txid: Option<String>,
-    /// Outgoing contract txid
-    pub outgoing_contract_txid: Option<String>,
+    /// Wallet UTXOs spent to fund the outgoing swap
+    pub outgoing_utxos: Vec<ReportUtxo>,
+    /// Wallet UTXOs created by sweeping the incoming swapcoins
+    pub incoming_utxos: Vec<ReportUtxo>,
     /// Funding transaction IDs organized by hops
     pub funding_txids: Vec<Vec<String>>,
     /// Number of makers involved
@@ -727,6 +727,24 @@ pub struct SwapReport {
 pub struct UtxoWithAddress {
     pub amount: i64,
     pub address: String,
+}
+
+/// User-facing UTXO information recorded in a swap report.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ReportUtxo {
+    /// Address locking the reported output
+    pub address: String,
+    /// Output value in satoshis
+    pub value: i64,
+}
+
+impl From<csReportUtxo> for ReportUtxo {
+    fn from(utxo: csReportUtxo) -> Self {
+        Self {
+            address: utxo.address,
+            value: utxo.value as i64,
+        }
+    }
 }
 
 impl From<csTakerReport> for SwapReport {
@@ -761,8 +779,16 @@ impl From<csTakerReport> for SwapReport {
             incoming_amount,
             outgoing_amount: report.outgoing_amount as i64,
             fee_paid: -(report.fee_paid as i64),
-            incoming_contract_txid: report.incoming_contract_txid,
-            outgoing_contract_txid: report.outgoing_contract_txid,
+            outgoing_utxos: report
+                .outgoing_utxos
+                .into_iter()
+                .map(ReportUtxo::from)
+                .collect(),
+            incoming_utxos: report
+                .incoming_utxos
+                .into_iter()
+                .map(ReportUtxo::from)
+                .collect(),
             funding_txids: report.funding_txids,
             makers_count: Some(report.makers_count as u32),
             maker_addresses: report.maker_addresses,
@@ -943,6 +969,17 @@ mod contract_tests {
             TakerError::General { msg } => msg,
             other => panic!("expected General error, got {other}"),
         }
+    }
+
+    #[test]
+    fn report_utxo_preserves_address_and_value() {
+        let utxo = ReportUtxo::from(csReportUtxo {
+            address: "bc1qreport".to_string(),
+            value: 42_000,
+        });
+
+        assert_eq!(utxo.address, "bc1qreport");
+        assert_eq!(utxo.value, 42_000);
     }
 
     #[test]

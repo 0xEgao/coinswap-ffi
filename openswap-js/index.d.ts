@@ -202,6 +202,13 @@ export interface PublicKey {
   inner: Array<number>
 }
 
+export interface ReportUtxo {
+  /** Address locking the reported output */
+  address: string
+  /** Output value in satoshis */
+  value: number
+}
+
 export interface RpcConfig {
   url: string
   username: string
@@ -251,10 +258,10 @@ export interface SwapReport {
   outgoingAmount: number
   /** Fee paid (negative) */
   feePaid: number
-  /** Incoming contract txid */
-  incomingContractTxid?: string
-  /** Outgoing contract txid */
-  outgoingContractTxid?: string
+  /** Wallet UTXOs spent to fund the outgoing swap */
+  outgoingUtxos: Array<ReportUtxo>
+  /** Wallet UTXOs created by sweeping the incoming swapcoins */
+  incomingUtxos: Array<ReportUtxo>
   /** Funding transaction IDs organized by hops */
   fundingTxids: Array<Array<string>>
   /** Number of makers involved */

@@ -315,6 +315,8 @@ class ApiContractTest(unittest.TestCase):
         )
         change = openswap.UtxoWithAddress(amount=25_000, address="bc1qchange")
         swap_output = openswap.UtxoWithAddress(amount=475_000, address="bc1qswap")
+        outgoing_utxo = openswap.ReportUtxo(address="bc1qoutgoing", value=510_000)
+        incoming_utxo = openswap.ReportUtxo(address="bc1qincoming", value=475_000)
         report_fields = dict(
             swap_id="swap-1",
             role="Taker",
@@ -327,8 +329,8 @@ class ApiContractTest(unittest.TestCase):
             incoming_amount=500_000,
             outgoing_amount=510_000,
             fee_paid=-10_000,
-            incoming_contract_txid="07" * 32,
-            outgoing_contract_txid=None,
+            outgoing_utxos=[outgoing_utxo],
+            incoming_utxos=[incoming_utxo],
             funding_txids=[["08" * 32], ["09" * 32]],
             makers_count=2,
             maker_addresses=["maker-1", "maker-2"],

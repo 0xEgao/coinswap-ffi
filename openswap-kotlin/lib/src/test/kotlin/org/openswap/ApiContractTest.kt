@@ -283,6 +283,8 @@ class ApiContractTest {
         val fee = MakerFeeInfo(1u, "maker.onion:6102", 100.0, 200.0, 300.0, 600.0)
         val change = UtxoWithAddress(25_000, "bc1qchange")
         val swapOutput = UtxoWithAddress(475_000, "bc1qswap")
+        val outgoingUtxo = ReportUtxo("bc1qoutgoing", 510_000)
+        val incomingUtxo = ReportUtxo("bc1qincoming", 475_000)
         val report = SwapReport(
             swapId = "swap-1",
             role = "Taker",
@@ -295,8 +297,8 @@ class ApiContractTest {
             incomingAmount = 500_000,
             outgoingAmount = 510_000,
             feePaid = -10_000,
-            incomingContractTxid = "07".repeat(32),
-            outgoingContractTxid = null,
+            outgoingUtxos = listOf(outgoingUtxo),
+            incomingUtxos = listOf(incomingUtxo),
             fundingTxids = listOf(listOf("08".repeat(32)), listOf("09".repeat(32))),
             makersCount = 2u,
             makerAddresses = listOf("maker-1", "maker-2"),
@@ -321,8 +323,8 @@ class ApiContractTest {
         assertEquals(500_000L, report.incomingAmount)
         assertEquals(510_000L, report.outgoingAmount)
         assertEquals(-10_000L, report.feePaid)
-        assertEquals("07".repeat(32), report.incomingContractTxid)
-        assertNull(report.outgoingContractTxid)
+        assertEquals(listOf(outgoingUtxo), report.outgoingUtxos)
+        assertEquals(listOf(incomingUtxo), report.incomingUtxos)
         assertEquals(2, report.fundingTxids.size)
         assertEquals(2u, report.makersCount)
         assertEquals(listOf("maker-1", "maker-2"), report.makerAddresses)

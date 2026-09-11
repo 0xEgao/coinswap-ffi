@@ -154,12 +154,14 @@ class ApiContractTest < Minitest::Test
     )
     change = Openswap::UtxoWithAddress.new(amount: 25_000, address: 'bc1qchange')
     swap_output = Openswap::UtxoWithAddress.new(amount: 475_000, address: 'bc1qswap')
+    outgoing_utxo = Openswap::ReportUtxo.new(address: 'bc1qoutgoing', value: 510_000)
+    incoming_utxo = Openswap::ReportUtxo.new(address: 'bc1qincoming', value: 475_000)
     report = Openswap::SwapReport.new(
       swap_id: 'swap-1', role: 'Taker', status: 'SUCCESS', swap_duration_seconds: 12.5,
       start_timestamp: 1_700_000_000, end_timestamp: 1_700_000_013,
       network: 'regtest', error_message: nil, incoming_amount: 500_000,
       outgoing_amount: 510_000, fee_paid: -10_000,
-      incoming_contract_txid: '07' * 32, outgoing_contract_txid: nil,
+      outgoing_utxos: [outgoing_utxo], incoming_utxos: [incoming_utxo],
       funding_txids: [['08' * 32], ['09' * 32]], makers_count: 2,
       maker_addresses: %w[maker-1 maker-2], total_maker_fees: 8_000,
       mining_fee: 2_000, fee_percentage: 2.0, maker_fee_info: [fee],
@@ -169,6 +171,8 @@ class ApiContractTest < Minitest::Test
     )
     assert_equal 'swap-1', report.swap_id
     assert_equal(-10_000, report.fee_paid)
+    assert_equal [outgoing_utxo], report.outgoing_utxos
+    assert_equal [incoming_utxo], report.incoming_utxos
     assert_equal 2, report.funding_txids.length
     assert_equal [fee], report.maker_fee_info
     assert_equal [change], report.output_change_utxos
