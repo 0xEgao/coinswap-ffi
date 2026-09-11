@@ -215,6 +215,8 @@ public class ApiContractTest
         var fee = new MakerFeeInfo(1, "maker.onion:6102", 100, 200, 300, 600);
         var change = new UtxoWithAddress(25_000, "bc1qchange");
         var swapOutput = new UtxoWithAddress(475_000, "bc1qswap");
+        var outgoingUtxo = new ReportUtxo("bc1qoutgoing", 510_000);
+        var incomingUtxo = new ReportUtxo("bc1qincoming", 475_000);
         var report = new SwapReport(
             SwapId: "swap-1",
             Role: "Taker",
@@ -227,8 +229,8 @@ public class ApiContractTest
             IncomingAmount: 500_000,
             OutgoingAmount: 510_000,
             FeePaid: -10_000,
-            IncomingContractTxid: string.Concat(Enumerable.Repeat("07", 32)),
-            OutgoingContractTxid: null,
+            OutgoingUtxos: [outgoingUtxo],
+            IncomingUtxos: [incomingUtxo],
             FundingTxids: [
                 [string.Concat(Enumerable.Repeat("08", 32))],
                 [string.Concat(Enumerable.Repeat("09", 32))],
@@ -246,6 +248,8 @@ public class ApiContractTest
             OutputSwapUtxos: [swapOutput]);
         Assert.Equal("swap-1", report.SwapId);
         Assert.Equal(-10_000, report.FeePaid);
+        Assert.Equal(outgoingUtxo, report.OutgoingUtxos.Single());
+        Assert.Equal(incomingUtxo, report.IncomingUtxos.Single());
         Assert.Equal(2, report.FundingTxids.Length);
         Assert.Equal((uint?)2, report.MakersCount);
         Assert.Equal(fee, report.MakerFeeInfo.Single());

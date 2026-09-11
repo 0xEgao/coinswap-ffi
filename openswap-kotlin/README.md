@@ -202,8 +202,8 @@ report.errorMessage                                   // error detail, if presen
 report.incomingAmount                                 // sats received by the taker
 report.outgoingAmount                                 // sats sent by the taker
 report.feePaid                                        // fee paid in sats (negative)
-report.incomingContractTxid                           // incoming contract txid, if any (nullable)
-report.outgoingContractTxid                           // outgoing contract txid, if any (nullable)
+report.outgoingUtxos                                  // funding inputs with address and value (List<ReportUtxo>)
+report.incomingUtxos                                  // swept wallet outputs with address and value (List<ReportUtxo>)
 report.fundingTxids                                   // funding txids grouped by hop (List<List<String>>)
 report.makersCount                                    // maker hop count used in the swap (nullable)
 report.makerAddresses                                 // maker addresses used in the route

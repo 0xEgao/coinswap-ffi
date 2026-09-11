@@ -196,6 +196,8 @@ final class ApiContractTests: XCTestCase {
             totalFee: 600)
         let change = UtxoWithAddress(amount: 25_000, address: "bc1qchange")
         let swapOutput = UtxoWithAddress(amount: 475_000, address: "bc1qswap")
+        let outgoingUtxo = ReportUtxo(address: "bc1qoutgoing", value: 510_000)
+        let incomingUtxo = ReportUtxo(address: "bc1qincoming", value: 475_000)
         let report = SwapReport(
             swapId: "swap-1",
             role: "Taker",
@@ -208,8 +210,8 @@ final class ApiContractTests: XCTestCase {
             incomingAmount: 500_000,
             outgoingAmount: 510_000,
             feePaid: -10_000,
-            incomingContractTxid: String(repeating: "07", count: 32),
-            outgoingContractTxid: nil,
+            outgoingUtxos: [outgoingUtxo],
+            incomingUtxos: [incomingUtxo],
             fundingTxids: [[String(repeating: "08", count: 32)],
                            [String(repeating: "09", count: 32)]],
             makersCount: 2,
@@ -225,6 +227,8 @@ final class ApiContractTests: XCTestCase {
             outputSwapUtxos: [swapOutput])
         XCTAssertEqual(report.swapId, "swap-1")
         XCTAssertEqual(report.feePaid, -10_000)
+        XCTAssertEqual(report.outgoingUtxos, [outgoingUtxo])
+        XCTAssertEqual(report.incomingUtxos, [incomingUtxo])
         XCTAssertEqual(report.fundingTxids.count, 2)
         XCTAssertEqual(report.makersCount, 2)
         XCTAssertEqual(report.makerFeeInfo, [fee])
