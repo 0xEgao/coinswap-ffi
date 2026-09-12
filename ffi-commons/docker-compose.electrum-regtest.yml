@@ -1,8 +1,10 @@
 services:
   bitcoind:
-    image: openswap/bitcoin-mutinynet:latest
+    image: bitcoin/bitcoin:29.4
     container_name: openswap-bitcoind
     user: "0:0"
+    environment:
+      BITCOIN_DATA: /home/bitcoin/.bitcoin
     command:
       - bitcoind
       - -datadir=/home/bitcoin/.bitcoin

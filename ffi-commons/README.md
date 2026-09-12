@@ -105,11 +105,13 @@ The package-local scripts wrap these steps and place outputs in the paths expect
 ```bash
 cd ffi-commons
 ./ffi-docker-setup setup
-./ffi-docker-setup start 4
+./ffi-docker-setup start
 ./ffi-docker-setup stop
 ```
 
-`start 4` brings up Bitcoin Core, Tor, and four maker services for end-to-end taker testing.
+`setup` pulls the pinned `bitcoin/bitcoin:29.4` image and builds the Openswap image. Bitcoin Core runs in regtest mode, with blocks mined locally. Use `./ffi-docker-setup pull-bitcoin` to pull just the Bitcoin Core image.
+
+`start` brings up Bitcoin Core, electrs, Tor, and two maker services (one RPC backend and one Electrum backend) for end-to-end taker testing.
 
 ## Resources
 

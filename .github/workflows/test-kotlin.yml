@@ -94,10 +94,11 @@ jobs:
         working-directory: ./ffi-commons
         run: |
           chmod +x ffi-docker-setup
-          if docker pull openswap/bitcoin-mutinynet:latest && docker pull openswap/openswap:master; then
+          ./ffi-docker-setup pull-bitcoin
+          if docker pull openswap/openswap:master; then
             echo "Using prebuilt Docker images"
           else
-            echo "Prebuilt image pull failed; falling back to local image build"
+            echo "Openswap image pull failed; falling back to local Openswap build"
             ./ffi-docker-setup setup
           fi
           # Fixed topology: bitcoind + electrs + tor + 2 RPC makers + 2 Electrum makers.
