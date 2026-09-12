@@ -113,6 +113,15 @@ cd ffi-commons
 
 `start` brings up Bitcoin Core, electrs, Tor, and two maker services (one RPC backend and one Electrum backend) for end-to-end taker testing.
 
+CI swaps use a local SOCKS5 proxy on port 9050 to route the two maker onion
+addresses directly to their containers. Real Tor on internal port 19050 still
+creates onion services and carries other traffic. This tests real swaps, but
+**does not exercise public Tor routing between the taker and makers**.
+To exercise real Tor instead, stop the stack and start it with
+`OPENSWAP_REAL_TOR=1 ./ffi-docker-setup start`.
+
+Run the proxy checks with `python3 -m unittest discover -s ffi-commons/tests` from the repository root.
+
 ## Resources
 
 - [UniFFI Documentation](https://mozilla.github.io/uniffi-rs/)

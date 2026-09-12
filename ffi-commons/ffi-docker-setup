@@ -11,7 +11,7 @@ IMAGE_NAME="openswap"
 # Static compose file describing the full regtest stack:
 #   bitcoind + electrs + tor + 1 RPC maker (makerd1) + 1 Electrum maker (makerd2).
 # Makers are production binaries: they expose Tor onion services and announce to
-# the public Nostr relays; the taker discovers and dials them over Tor.
+# public Nostr relays; CI routes their onion addresses through a local SOCKS proxy.
 # The maker's legacy/taproot protocol is NOT a maker-side setting; it is chosen
 # taker-side via SwapParams.protocol, so both taker protocols are exercised
 # against the same protocol-agnostic makers.
@@ -20,7 +20,7 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose.electrum-regtest.yml"
 BITCOIN_RPC_PORT="18442"
 BITCOIN_ZMQ_PORT="28332"
 ELECTRUM_PORT="50001"
-TOR_SOCKS_PORT="9050"
+TOR_SOCKS_PORT="19050"
 TOR_CONTROL_PORT="9051"
 MAKER_STARTUP_TIMEOUT_SECONDS="${MAKER_STARTUP_TIMEOUT_SECONDS:-120}"
 MAKER_RESTART_LIMIT="${MAKER_RESTART_LIMIT:-3}"
@@ -109,6 +109,8 @@ pull_bitcoin_image() {
 start_stack() {
     check_docker
     generate_torrc
+    mkdir -p "$SCRIPT_DIR/.ci-socks"
+    : > "$SCRIPT_DIR/.ci-socks/makers"
     print_info "Starting Openswap regtest stack (1 RPC + 1 Electrum maker)..."
     cd "$SCRIPT_DIR"
     if docker compose -f "$COMPOSE_FILE" up -d; then
@@ -121,6 +123,7 @@ start_stack() {
         fund_makers
 
         start_block_mining
+        wait_for_stack_ready
     else
         print_error "Failed to start Openswap stack"
         exit 1
@@ -222,12 +225,15 @@ wait_for_stack_ready() {
     local setup_count
     local onion_count
     local all_ready
+    local routes onion maker_port
 
     check_docker
     print_info "Waiting for both makers to finish setup and publish onion addresses..."
 
     while [ "$elapsed" -lt "$STACK_READY_TIMEOUT_SECONDS" ]; do
         all_ready=true
+        routes=""
+        maker_port=16102
 
         for maker_name in "${ALL_MAKERS[@]}"; do
             container_name="openswap-${maker_name}"
@@ -256,13 +262,20 @@ wait_for_stack_ready() {
             fi
             maker_logs=$(docker logs --since "$started_at" "$container_name" 2>&1 || true)
             setup_count=$(printf '%s\n' "$maker_logs" | grep -c "Server setup complete" || true)
-            onion_count=$(printf '%s\n' "$maker_logs" | grep -c "Generated new Tor Hidden Service Hostname" || true)
-            if [ "$setup_count" -lt 1 ] || [ "$onion_count" -lt 1 ]; then
+            onion_count=$(printf '%s\n' "$maker_logs" | grep -Ec "Generated (new|existing) Tor Hidden Service Hostname" || true)
+            onion=$(printf '%s\n' "$maker_logs" | grep -E "Generated (new|existing) Tor Hidden Service Hostname" | grep -Eo '[a-z2-7]{56}\.onion' | tail -1 || true)
+            routes="${routes}${onion} ${maker_port}"$'\n'
+            maker_port=$((maker_port + 1))
+            if [ "$setup_count" -lt 1 ] || [ "$onion_count" -lt 1 ] || [ -z "$onion" ]; then
                 all_ready=false
             fi
         done
 
         if $all_ready; then
+            # Mount the directory so the proxy sees atomic route replacements.
+            mkdir -p "$SCRIPT_DIR/.ci-socks"
+            printf '%s' "$routes" > "$SCRIPT_DIR/.ci-socks/makers.tmp"
+            mv "$SCRIPT_DIR/.ci-socks/makers.tmp" "$SCRIPT_DIR/.ci-socks/makers"
             print_success "Both local makers are ready"
             return 0
         fi
@@ -324,6 +337,14 @@ fund_makers() {
 }
 
 mine_blocks() {
+    if [ "${SUBCOMMAND_ARG:-}" = "pending" ]; then
+        local mempool
+        mempool=$(docker exec openswap-bitcoind bitcoin-cli \
+            -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password \
+            getrawmempool) || return $?
+        # Empty mempools need no extra blocks; preserve refund timelock headroom.
+        printf '%s' "$mempool" | grep -Eq '[[:xdigit:]]{64}' || return 0
+    fi
     local addr=$(docker exec openswap-bitcoind bitcoin-cli \
         -regtest -rpcport=$BITCOIN_RPC_PORT -rpcuser=user -rpcpassword=password \
         -rpcwallet=test getnewaddress 2>/dev/null)
@@ -344,11 +365,10 @@ start_block_mining() {
         fi
     fi
 
-    # Mine one block every 20s. Fast enough to confirm fidelity bonds and
-    # funding promptly, but slow enough that a multi-hop openswap over Tor
-    # completes well within its refund timelock window (~31 blocks of headroom).
-    # A 5s cadence raced past the swap timelock and broke Taproot swaps.
-    print_info "Starting automatic block mining (every 20 seconds)..."
+    # Empty blocks stay ~20s apart. In local SOCKS mode, confirm pending txs
+    # promptly: a 20s mining cadence plus 10s/20s wallet polling can exceed the
+    # maker's 20s admission deadline before Taproot sends its contract data.
+    print_info "Starting block mining (20s empty blocks; local pending-tx polling)..."
 
     nohup bash -c '
         while true; do
@@ -356,7 +376,15 @@ start_block_mining() {
                 break
             fi
             "'"$SCRIPT_DIR"'/ffi-docker-setup" mine
-            sleep 20
+            if [ "${OPENSWAP_REAL_TOR:-0}" = "1" ]; then
+                sleep 20
+            else
+                for _ in {1..19}; do
+                    sleep 1
+                    "'"$SCRIPT_DIR"'/ffi-docker-setup" mine pending || exit $?
+                done
+                sleep 1
+            fi
         done
     ' > "$SCRIPT_DIR/.block-mining.log" 2>&1 &
 

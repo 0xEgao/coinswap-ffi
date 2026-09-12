@@ -55,6 +55,9 @@ jobs:
             libssl-dev \
             pkg-config
 
+      - name: Test CI SOCKS proxy
+        run: python3 -m unittest discover -s ffi-commons/tests -v
+
       - name: Run network-free FFI contract tests
         working-directory: ./ffi-commons
         run: cargo test contract_tests -- --nocapture

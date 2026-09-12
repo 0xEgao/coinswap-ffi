@@ -10,17 +10,38 @@ on:
     paths:
       - "ffi-commons/**"
       - "openswap-swift/**"
+      - ".github/workflows/test-swift.yml"
   pull_request:
     branches:
       - main
     paths:
       - "ffi-commons/**"
       - "openswap-swift/**"
+      - ".github/workflows/test-swift.yml"
 
 permissions: {}
 
 jobs:
+  build-maker-image:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # Compile native dependencies on Linux; GCC can SIGILL inside macOS Colima.
+      - name: Build maker image
+        shell: bash
+        working-directory: ./ffi-commons
+        run: |
+          ./ffi-docker-setup setup
+          docker save openswap/openswap:master | gzip > "${RUNNER_TEMP}/swift-maker.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: swift-maker-image
+          path: ${{ runner.temp }}/swift-maker.tar.gz
+          retention-days: 1
+          compression-level: 0
+
   test:
+    needs: build-maker-image
     name: "Test Swift library"
     runs-on: macos-15-intel
     defaults:
@@ -76,18 +97,18 @@ jobs:
           docker version
           docker info
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: swift-maker-image
+          path: ${{ runner.temp }}
+
       - name: Setup Docker environment
         working-directory: ./ffi-commons
         run: |
           chmod +x ffi-docker-setup
           ./ffi-docker-setup pull-bitcoin
-          if docker pull openswap/openswap:master; then
-            echo "Using prebuilt Docker images"
-          else
-            echo "Openswap image pull failed; falling back to local Openswap build"
-            ./ffi-docker-setup setup
-          fi
-          # Fixed topology: bitcoind + electrs + tor + 2 RPC makers + 2 Electrum makers.
+          docker load -i "${RUNNER_TEMP}/swift-maker.tar.gz"
+          # Fixed topology: bitcoind + electrs + tor + 1 RPC maker + 1 Electrum maker.
           ./ffi-docker-setup start
 
       - name: Check Docker containers status
