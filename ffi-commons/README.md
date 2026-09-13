@@ -105,11 +105,22 @@ The package-local scripts wrap these steps and place outputs in the paths expect
 ```bash
 cd ffi-commons
 ./ffi-docker-setup setup
-./ffi-docker-setup start 4
+./ffi-docker-setup start
 ./ffi-docker-setup stop
 ```
 
-`start 4` brings up Bitcoin Core, Tor, and four maker services for end-to-end taker testing.
+`setup` pulls the pinned `bitcoin/bitcoin:29.4` image and builds the Openswap image. Bitcoin Core runs in regtest mode, with blocks mined locally. Use `./ffi-docker-setup pull-bitcoin` to pull just the Bitcoin Core image.
+
+`start` brings up Bitcoin Core, electrs, Tor, and two maker services (one RPC backend and one Electrum backend) for end-to-end taker testing.
+
+CI swaps use a local SOCKS5 proxy on port 9050 to route the two maker onion
+addresses directly to their containers. Real Tor on internal port 19050 still
+creates onion services and carries other traffic. This tests real swaps, but
+**does not exercise public Tor routing between the taker and makers**.
+To exercise real Tor instead, stop the stack and start it with
+`OPENSWAP_REAL_TOR=1 ./ffi-docker-setup start`.
+
+Run the proxy checks with `python3 -m unittest discover -s ffi-commons/tests` from the repository root.
 
 ## Resources
 

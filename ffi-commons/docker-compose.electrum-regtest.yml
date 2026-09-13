@@ -1,8 +1,10 @@
 services:
   bitcoind:
-    image: openswap/bitcoin-mutinynet:latest
+    image: bitcoin/bitcoin:29.4
     container_name: openswap-bitcoind
     user: "0:0"
+    environment:
+      BITCOIN_DATA: /home/bitcoin/.bitcoin
     command:
       - bitcoind
       - -datadir=/home/bitcoin/.bitcoin
@@ -80,18 +82,37 @@ services:
       - "9051:9051"
     restart: unless-stopped
 
+  ci-socks:
+    image: python:3.12.13-alpine3.23
+    container_name: openswap-ci-socks
+    network_mode: "service:tor"
+    environment:
+      OPENSWAP_REAL_TOR: ${OPENSWAP_REAL_TOR:-0}
+    volumes:
+      - ./ci_socks_proxy.py:/proxy.py:ro
+      - ./.ci-socks:/routes:ro
+    command: ["python", "-u", "/proxy.py"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',9050),2); s.sendall(bytes([5,1,0])); assert s.recv(2)==bytes([5,0])"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
   # ---- RPC maker (Bitcoin Core backend) ----
   makerd1:
     image: openswap/openswap:master
     container_name: openswap-makerd1
     network_mode: "service:tor"
     depends_on:
+      ci-socks:
+        condition: service_healthy
       bitcoind:
         condition: service_healthy
     command: >
       sh -c 'sleep 1 &&
       mkdir -p /home/openswap/.openswap/maker &&
-      printf "%s\n" "network_port = 16102" "rpc_port = 6102" "socks_port = 9050" "control_port = 9051" "tor_auth_password = openswap" "min_swap_amount = 10000" "fidelity_amount = 50000" "fidelity_timelock = 13104" > /home/openswap/.openswap/maker/config.toml &&
+      printf "%s\n" "network_port = 16102" "rpc_port = 6102" "socks_port = 19050" "control_port = 9051" "tor_auth_password = openswap" "min_swap_amount = 10000" "fidelity_amount = 50000" "fidelity_timelock = 13104" > /home/openswap/.openswap/maker/config.toml &&
       makerd -r bitcoind:18442 -z tcp://bitcoind:28332 -a user:password -w makerd1-wallet -p ffi-regtest-wallet-password'
     environment:
       - RUST_LOG=info
@@ -100,18 +121,20 @@ services:
   # ---- Electrum maker (electrs backend) ----
   # The maker's Electrum backend talks to electrs directly over the shared
   # docker network (clearnet hostname), so --electrum-tor is NOT needed here;
-  # peer-to-peer maker traffic still goes over Tor via network_mode.
+  # The shared network namespace also lets the CI proxy reach maker loopback ports.
   makerd2:
     image: openswap/openswap:master
     container_name: openswap-makerd2
     network_mode: "service:tor"
     depends_on:
+      ci-socks:
+        condition: service_healthy
       electrs:
         condition: service_healthy
     command: >
       sh -c 'sleep 2 &&
       mkdir -p /home/openswap/.openswap/maker &&
-      printf "%s\n" "network_port = 16103" "rpc_port = 6103" "socks_port = 9050" "control_port = 9051" "tor_auth_password = openswap" "min_swap_amount = 10000" "fidelity_amount = 50000" "fidelity_timelock = 13104" > /home/openswap/.openswap/maker/config.toml &&
+      printf "%s\n" "network_port = 16103" "rpc_port = 6103" "socks_port = 19050" "control_port = 9051" "tor_auth_password = openswap" "min_swap_amount = 10000" "fidelity_amount = 50000" "fidelity_timelock = 13104" > /home/openswap/.openswap/maker/config.toml &&
       makerd --electrum tcp://electrs:50001 -w makerd2-wallet -p ffi-regtest-wallet-password'
     environment:
       - RUST_LOG=info
